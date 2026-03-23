@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.7.0
+// @version      0.8.0
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -39,7 +39,19 @@
   const COPY_MARKDOWN_BUTTON_ATTRIBUTE = 'data-gwu-copy-markdown';
   const COPY_MARKDOWN_STYLE_ID = 'gwu-copy-markdown-style';
   const AUTO_EXPAND_CONTROL_ATTRIBUTE = 'data-gwu-auto-expand-processed';
+  const EXPORT_CONVERSATION_BUTTON_ID = 'gwu-export-conversation';
   const MAX_CODE_COPY_SCOPE_DEPTH = 5;
+  const USER_TURN_SELECTOR = [
+    '[data-gwu-role]',
+    '[data-turn-role]',
+    '[data-message-author]',
+    '[data-author]',
+    'user-query'
+  ].join(', ');
+  const CONVERSATION_TURN_SELECTOR = [
+    RESPONSE_CONTAINER_SELECTOR,
+    USER_TURN_SELECTOR
+  ].join(', ');
 
   const GEMINI_IMAGE_CONTAINER_SELECTOR = 'generated-image, .generated-image-container';
   const GEMINI_IMAGE_QUERY_SELECTOR = GEMINI_IMAGE_CONTAINER_SELECTOR
@@ -762,6 +774,170 @@
     };
   }
 
+  function hasClass(node, className) {
+    return String(node && node.className ? node.className : '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .includes(className);
+  }
+
+  function normalizeConversationRole(value) {
+    const role = normalizeExpandControlText(value);
+    if (!role) {
+      return '';
+    }
+
+    if (role === 'user' || role === 'human' || role === 'prompt') {
+      return 'user';
+    }
+
+    if (role === 'assistant' || role === 'model' || role === 'gemini' || role === 'response') {
+      return 'assistant';
+    }
+
+    return '';
+  }
+
+  function getConversationTurnRole(element) {
+    if (!element) {
+      return '';
+    }
+
+    if (hasClass(element, 'response-container')) {
+      return 'assistant';
+    }
+
+    const roleValues = [
+      getNodeAttribute(element, 'data-gwu-role'),
+      getNodeAttribute(element, 'data-turn-role'),
+      getNodeAttribute(element, 'data-message-author'),
+      getNodeAttribute(element, 'data-author')
+    ];
+
+    for (const value of roleValues) {
+      const normalized = normalizeConversationRole(value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return getNodeTagName(element) === 'user-query' ? 'user' : '';
+  }
+
+  function normalizeConversationText(text) {
+    return String(text || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function getConversationTurnText(element, role) {
+    if (!element || !role) {
+      return '';
+    }
+
+    if (role === 'assistant') {
+      return buildResponseMarkdown(element);
+    }
+
+    const contentRoot = typeof element.querySelector === 'function'
+      ? element.querySelector(CONTENT_ROOT_SELECTOR)
+      : null;
+    return normalizeConversationText(getNodeText(contentRoot || element));
+  }
+
+  function getConversationExportTitle() {
+    if (typeof document === 'undefined') {
+      return 'Gemini Conversation';
+    }
+
+    const title = String(document.title || '')
+      .replace(/\s*-\s*Gemini\s*$/i, '')
+      .trim();
+
+    return title || 'Gemini Conversation';
+  }
+
+  function buildConversationMarkdown(root, options) {
+    const scope = root && typeof root.querySelectorAll === 'function' ? root : null;
+    if (!scope) {
+      return '';
+    }
+
+    const title = normalizeConversationText(options && options.title ? options.title : '');
+    const sections = [];
+
+    if (title) {
+      sections.push('# ' + title);
+    }
+
+    const turns = [];
+    scope.querySelectorAll(CONVERSATION_TURN_SELECTOR).forEach((element) => {
+      const role = getConversationTurnRole(element);
+      if (!role) {
+        return;
+      }
+
+      const text = getConversationTurnText(element, role);
+      if (!text) {
+        return;
+      }
+
+      turns.push('## ' + (role === 'user' ? 'User' : 'Gemini') + '\n\n' + text);
+    });
+
+    if (!turns.length) {
+      return '';
+    }
+
+    sections.push(turns.join('\n\n'));
+    return sections.join('\n\n');
+  }
+
+  function slugifyFilenamePart(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80);
+  }
+
+  function buildConversationExportFilename(title) {
+    const slug = slugifyFilenamePart(title);
+    return (slug || 'gemini-conversation') + '.md';
+  }
+
+  function downloadTextFile(filename, text, mimeType) {
+    if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') {
+      return false;
+    }
+
+    const blob = new Blob([text], { type: mimeType || 'text/plain;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => {
+      URL.revokeObjectURL(objectUrl);
+    }, 1000);
+    return true;
+  }
+
+  function exportCurrentConversation() {
+    const title = getConversationExportTitle();
+    const markdown = buildConversationMarkdown(document, { title });
+    if (!markdown) {
+      return false;
+    }
+
+    return downloadTextFile(buildConversationExportFilename(title), markdown, 'text/markdown;charset=utf-8');
+  }
+
   async function writeClipboardPayload(payload) {
     if (!payload || !payload.text) {
       return false;
@@ -1345,6 +1521,18 @@
       '  border-radius: 0.6rem;',
       '  padding: 0.55rem 0.65rem;',
       '  font: inherit;',
+      '}',
+      '.gwu-settings-action {',
+      '  margin-top: 0.5rem;',
+      '  border: 1px solid rgba(60, 64, 67, 0.16);',
+      '  background: rgba(60, 64, 67, 0.04);',
+      '  border-radius: 0.65rem;',
+      '  padding: 0.65rem 0.9rem;',
+      '  font: inherit;',
+      '  cursor: pointer;',
+      '}',
+      '.gwu-settings-action:hover {',
+      '  background: rgba(60, 64, 67, 0.08);',
       '}'
     ].join('\n');
     document.head.appendChild(style);
@@ -1460,6 +1648,25 @@
         wrapper.appendChild(input);
         panel.appendChild(wrapper);
       });
+
+      const actionsTitle = document.createElement('h3');
+      actionsTitle.textContent = 'Actions';
+      panel.appendChild(actionsTitle);
+
+      const exportButton = document.createElement('button');
+      exportButton.id = EXPORT_CONVERSATION_BUTTON_ID;
+      exportButton.type = 'button';
+      exportButton.className = 'gwu-settings-action';
+      exportButton.textContent = 'Export Conversation (.md)';
+      exportButton.addEventListener('click', () => {
+        const originalText = exportButton.textContent;
+        const exported = exportCurrentConversation();
+        exportButton.textContent = exported ? 'Conversation Exported' : 'Nothing To Export';
+        window.setTimeout(() => {
+          exportButton.textContent = originalText;
+        }, 1400);
+      });
+      panel.appendChild(exportButton);
 
       document.body.appendChild(button);
       document.body.appendChild(panel);
@@ -2834,7 +3041,7 @@
     }
 
     const debugApi = {
-      version: '0.7.0',
+      version: '0.8.0',
       events: [],
       clear() {
         this.events.length = 0;
@@ -3125,6 +3332,8 @@
     isLikelyResponseExpandControl,
     convertHtmlTreeToMarkdown,
     buildResponseMarkdown,
+    buildConversationMarkdown,
+    buildConversationExportFilename,
     extractCodeTextFromBlock,
     classifyGeminiAssetPath,
     classifyGeminiAssetUrl,

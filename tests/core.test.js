@@ -9,6 +9,8 @@ const {
   isLikelyResponseExpandControl,
   convertHtmlTreeToMarkdown,
   buildResponseMarkdown,
+  buildConversationMarkdown,
+  buildConversationExportFilename,
   extractCodeTextFromBlock,
   classifyGeminiAssetPath,
   classifyGeminiAssetUrl,
@@ -415,6 +417,42 @@ test('builds full-response markdown from the Gemini content root', () => {
   };
 
   assert.equal(buildResponseMarkdown(responseContainer), 'Line one\n\nLine two');
+});
+
+test('builds conversation markdown from user and Gemini turns', () => {
+  const conversation = elementNode('div', {}, [
+    elementNode('section', { attributes: { 'data-gwu-role': 'user' } }, [
+      elementNode('p', {}, [textNode('How do I make tea?')])
+    ]),
+    elementNode('div', { className: 'response-container' }, [
+      elementNode('div', { className: 'markdown' }, [
+        elementNode('p', {}, [textNode('Boil water.')]),
+        elementNode('p', {}, [textNode('Steep the tea.')])
+      ])
+    ])
+  ]);
+
+  assert.equal(
+    buildConversationMarkdown(conversation, { title: 'Fixture Conversation' }),
+    [
+      '# Fixture Conversation',
+      '',
+      '## User',
+      '',
+      'How do I make tea?',
+      '',
+      '## Gemini',
+      '',
+      'Boil water.',
+      '',
+      'Steep the tea.'
+    ].join('\n')
+  );
+});
+
+test('builds deterministic export filenames from the conversation title', () => {
+  assert.equal(buildConversationExportFilename('Fixture Conversation'), 'fixture-conversation.md');
+  assert.equal(buildConversationExportFilename(''), 'gemini-conversation.md');
 });
 
 test('detects likely response expansion controls without matching unrelated actions', () => {

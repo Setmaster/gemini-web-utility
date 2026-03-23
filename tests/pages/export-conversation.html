@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fixture Conversation - Gemini</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 2rem;
+    }
+
+    [data-gwu-role="user"],
+    .response-container {
+      border: 1px solid #dadce0;
+      border-radius: 1rem;
+      padding: 1rem;
+      max-width: 48rem;
+      margin-bottom: 1rem;
+    }
+  </style>
+  <script>
+    localStorage.removeItem('gwuSettings');
+    window.__gwuExport = {
+      href: '',
+      download: '',
+      blob: null
+    };
+
+    const originalCreateObjectURL = URL.createObjectURL.bind(URL);
+    const originalRevokeObjectURL = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = function createObjectURL(blob) {
+      window.__gwuExport.blob = blob;
+      return originalCreateObjectURL(blob);
+    };
+    URL.revokeObjectURL = function revokeObjectURL(url) {
+      return originalRevokeObjectURL(url);
+    };
+
+    const originalAnchorClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function patchedAnchorClick() {
+      if (this.download) {
+        window.__gwuExport.href = this.href;
+        window.__gwuExport.download = this.download;
+        return;
+      }
+      return originalAnchorClick.call(this);
+    };
+
+    window.getLastExport = async function getLastExport() {
+      const blob = window.__gwuExport.blob;
+      return {
+        href: window.__gwuExport.href,
+        download: window.__gwuExport.download,
+        text: blob ? await blob.text() : ''
+      };
+    };
+  </script>
+</head>
+<body>
+  <section data-gwu-role="user">
+    <p>How do I make tea?</p>
+  </section>
+  <div class="response-container">
+    <h2>Gemini said</h2>
+    <div class="markdown">
+      <p>Boil water.</p>
+      <p>Steep the tea.</p>
+    </div>
+  </div>
+  <section data-gwu-role="user">
+    <p>What about iced tea?</p>
+  </section>
+  <div class="response-container">
+    <h2>Gemini said</h2>
+    <div class="markdown">
+      <p>Brew it hot first, then chill it over ice.</p>
+    </div>
+  </div>
+  <script src="../../gemini-web-utility.user.js"></script>
+</body>
+</html>
