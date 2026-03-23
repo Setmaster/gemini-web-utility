@@ -6,6 +6,7 @@ const {
   sanitizeSettings,
   parseShortcutDefinition,
   matchShortcutEvent,
+  isLikelyResponseExpandControl,
   convertHtmlTreeToMarkdown,
   buildResponseMarkdown,
   extractCodeTextFromBlock,
@@ -236,6 +237,7 @@ test('sanitizes settings payloads against known defaults', () => {
       copyAsMarkdown: true,
       codeBlockCopyFix: true,
       watermarkRemoval: true,
+      autoExpandResponses: true,
       keyboardShortcutsEnabled: true,
       shortcutNewChat: 'Ctrl+Shift+N',
       shortcutSubmit: 'Shift+Enter',
@@ -413,6 +415,16 @@ test('builds full-response markdown from the Gemini content root', () => {
   };
 
   assert.equal(buildResponseMarkdown(responseContainer), 'Line one\n\nLine two');
+});
+
+test('detects likely response expansion controls without matching unrelated actions', () => {
+  const expandButton = elementNode('button', {}, [textNode('Show more')]);
+  const continueButton = elementNode('button', { attributes: { 'aria-label': 'Continue generating' } }, []);
+  const copyButton = elementNode('button', {}, [textNode('Copy')]);
+
+  assert.equal(isLikelyResponseExpandControl(expandButton), true);
+  assert.equal(isLikelyResponseExpandControl(continueButton), true);
+  assert.equal(isLikelyResponseExpandControl(copyButton), false);
 });
 
 test('extracts code text without line-number gutter nodes', () => {

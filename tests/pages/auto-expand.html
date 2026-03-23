@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gemini Auto Expand Fixture</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 2rem;
+    }
+
+    .response-container {
+      border: 1px solid #dadce0;
+      border-radius: 1rem;
+      padding: 1rem;
+      max-width: 48rem;
+    }
+
+    #extra {
+      display: none;
+      margin-top: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="response-container">
+    <h2>Gemini said</h2>
+    <div class="markdown">
+      <p>Visible summary.</p>
+      <p id="extra">Expanded paragraph revealed by the auto-expand feature.</p>
+      <button id="show-more" type="button">Show more</button>
+    </div>
+  </div>
+  <script>
+    localStorage.removeItem('gwuSettings');
+    const button = document.getElementById('show-more');
+    const extra = document.getElementById('extra');
+    let clickCount = 0;
+
+    button.addEventListener('click', () => {
+      clickCount += 1;
+      extra.style.display = 'block';
+      button.textContent = 'Expanded';
+      button.setAttribute('aria-disabled', 'true');
+      button.disabled = true;
+    });
+
+    window.getAutoExpandState = function getAutoExpandState() {
+      return {
+        clickCount,
+        buttonText: button.textContent,
+        processedState: button.getAttribute('data-gwu-auto-expand-processed'),
+        expandedText: extra.textContent,
+        expandedDisplay: extra.style.display
+      };
+    };
+  </script>
+  <script src="../../gemini-web-utility.user.js"></script>
+</body>
+</html>

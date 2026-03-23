@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.6.0
-// @description  Utilities for the Gemini web app: clean copy and NanoBanana watermark removal.
+// @version      0.7.0
+// @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -38,6 +38,7 @@
   const COPY_MARKDOWN_BUTTON_CLASS = 'gwu-copy-markdown-button';
   const COPY_MARKDOWN_BUTTON_ATTRIBUTE = 'data-gwu-copy-markdown';
   const COPY_MARKDOWN_STYLE_ID = 'gwu-copy-markdown-style';
+  const AUTO_EXPAND_CONTROL_ATTRIBUTE = 'data-gwu-auto-expand-processed';
   const MAX_CODE_COPY_SCOPE_DEPTH = 5;
 
   const GEMINI_IMAGE_CONTAINER_SELECTOR = 'generated-image, .generated-image-container';
@@ -68,6 +69,7 @@
     copyAsMarkdown: true,
     codeBlockCopyFix: true,
     watermarkRemoval: true,
+    autoExpandResponses: true,
     keyboardShortcutsEnabled: true,
     shortcutNewChat: 'Ctrl+Shift+N',
     shortcutSubmit: 'Ctrl+Enter',
@@ -93,6 +95,11 @@
       key: 'watermarkRemoval',
       label: 'Watermark Removal',
       description: 'Keep NanoBanana image watermark removal active.'
+    },
+    {
+      key: 'autoExpandResponses',
+      label: 'Auto-Expand Responses',
+      description: 'Open truncated Gemini responses automatically when a visible expand control appears.'
     },
     {
       key: 'keyboardShortcutsEnabled',
@@ -961,6 +968,173 @@
 
     observe();
     subscribeToSettings(syncButtonVisibility);
+  }
+
+  function normalizeExpandControlText(value) {
+    return String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function isLikelyResponseExpandControl(element) {
+    if (!element) {
+      return false;
+    }
+
+    const tagName = getNodeTagName(element);
+    const role = normalizeExpandControlText(getNodeAttribute(element, 'role'));
+    const isInteractive = (
+      tagName === 'button' ||
+      tagName === 'summary' ||
+      role === 'button' ||
+      (tagName === 'a' && Boolean(getNodeAttribute(element, 'href')))
+    );
+
+    if (!isInteractive) {
+      return false;
+    }
+
+    const label = normalizeExpandControlText([
+      getNodeText(element),
+      getNodeAttribute(element, 'aria-label'),
+      getNodeAttribute(element, 'title'),
+      getNodeAttribute(element, 'data-test-id')
+    ].join(' '));
+
+    if (!label) {
+      return false;
+    }
+
+    if (
+      label.includes('copy') ||
+      label.includes('share') ||
+      label.includes('download') ||
+      label.includes('edit') ||
+      label.includes('retry')
+    ) {
+      return false;
+    }
+
+    return (
+      /^show more$/.test(label) ||
+      /^read more$/.test(label) ||
+      /^see more$/.test(label) ||
+      /^expand(?: response)?$/.test(label) ||
+      /^continue(?: generating| response| writing)?$/.test(label)
+    );
+  }
+
+  function isActionableExpandControl(element, options) {
+    const config = options || {};
+    if (!element) {
+      return false;
+    }
+
+    if (!config.allowMarked && element.hasAttribute(AUTO_EXPAND_CONTROL_ATTRIBUTE)) {
+      return false;
+    }
+
+    if (element.hidden) {
+      return false;
+    }
+
+    if (element.disabled || normalizeExpandControlText(getNodeAttribute(element, 'aria-disabled')) === 'true') {
+      return false;
+    }
+
+    if (typeof element.getClientRects === 'function' && element.getClientRects().length === 0) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function installAutoExpandResponses() {
+    function clickExpandControl(control) {
+      if (!isFeatureEnabled('autoExpandResponses') || !isActionableExpandControl(control)) {
+        return;
+      }
+
+      control.setAttribute(AUTO_EXPAND_CONTROL_ATTRIBUTE, 'pending');
+
+      window.setTimeout(() => {
+        try {
+          if (!document.contains(control) || !isActionableExpandControl(control, { allowMarked: true })) {
+            return;
+          }
+          control.click();
+          control.setAttribute(AUTO_EXPAND_CONTROL_ATTRIBUTE, 'done');
+        } catch {
+          control.setAttribute(AUTO_EXPAND_CONTROL_ATTRIBUTE, 'failed');
+        }
+      }, 0);
+    }
+
+    function processResponseContainer(responseContainer) {
+      if (!responseContainer || typeof responseContainer.querySelectorAll !== 'function') {
+        return;
+      }
+
+      responseContainer
+        .querySelectorAll('button, summary, [role="button"], a[href]')
+        .forEach((control) => {
+          if (isLikelyResponseExpandControl(control)) {
+            clickExpandControl(control);
+          }
+        });
+    }
+
+    function processRoot(root) {
+      const scope = root && typeof root.querySelectorAll === 'function' ? root : document;
+      if (!scope || typeof scope.querySelectorAll !== 'function') {
+        return;
+      }
+
+      if (scope instanceof Element && scope.matches(RESPONSE_CONTAINER_SELECTOR)) {
+        processResponseContainer(scope);
+      }
+
+      scope.querySelectorAll(RESPONSE_CONTAINER_SELECTOR).forEach((responseContainer) => {
+        processResponseContainer(responseContainer);
+      });
+    }
+
+    const observer = new MutationObserver((mutations) => {
+      if (!isFeatureEnabled('autoExpandResponses')) {
+        return;
+      }
+
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof Element) {
+            processRoot(node);
+          }
+        }
+      }
+    });
+
+    function observe() {
+      const root = document.body || document.documentElement;
+      if (!root) {
+        return;
+      }
+
+      processRoot(document);
+      observer.observe(root, { childList: true, subtree: true });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', observe, { once: true });
+      return;
+    }
+
+    observe();
+    subscribeToSettings((settings) => {
+      if (settings.autoExpandResponses) {
+        processRoot(document);
+      }
+    });
   }
 
   function normalizeCodeText(text) {
@@ -2660,7 +2834,7 @@
     }
 
     const debugApi = {
-      version: '0.6.0',
+      version: '0.7.0',
       events: [],
       clear() {
         this.events.length = 0;
@@ -2948,6 +3122,7 @@
     sanitizeSettings,
     parseShortcutDefinition,
     matchShortcutEvent,
+    isLikelyResponseExpandControl,
     convertHtmlTreeToMarkdown,
     buildResponseMarkdown,
     extractCodeTextFromBlock,
@@ -2976,6 +3151,7 @@
   installKeyboardShortcuts();
   installCopyMarkdownButtons();
   installCodeBlockCopyFix();
+  installAutoExpandResponses();
   installGeminiDownloadHook();
   installPageImageReplacement();
 })();
