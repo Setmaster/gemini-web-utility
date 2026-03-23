@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   sanitizeLeadingResponseLabel,
+  sanitizeSettings,
   convertHtmlTreeToMarkdown,
   buildResponseMarkdown,
   extractCodeTextFromBlock,
@@ -217,6 +218,22 @@ test('keeps text unchanged when heading is absent', () => {
   assert.equal(
     sanitizeLeadingResponseLabel('I like potatoes', 'Gemini said'),
     'I like potatoes'
+  );
+});
+
+test('sanitizes settings payloads against known defaults', () => {
+  assert.deepEqual(
+    sanitizeSettings({
+      cleanCopy: false,
+      copyAsMarkdown: true,
+      unknownSetting: false
+    }),
+    {
+      cleanCopy: false,
+      copyAsMarkdown: true,
+      codeBlockCopyFix: true,
+      watermarkRemoval: true
+    }
   );
 });
 

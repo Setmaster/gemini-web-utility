@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gemini Settings Fixture</title>
+</head>
+<body>
+  <div class="response-container">
+    <h2>Gemini said</h2>
+    <div class="markdown">
+      <p>Fixture page for the settings panel.</p>
+    </div>
+  </div>
+  <script>
+    localStorage.removeItem('gwuSettings');
+    window.readSettingsStorage = function readSettingsStorage() {
+      return localStorage.getItem('gwuSettings');
+    };
+  </script>
+  <script src="../../gemini-web-utility.user.js"></script>
+</body>
+</html>

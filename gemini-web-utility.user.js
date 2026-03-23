@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.3.0
+// @version      0.5.0
 // @description  Utilities for the Gemini web app: clean copy and NanoBanana watermark removal.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -59,6 +59,38 @@
   const DEBUG_REASON_KEY = 'gwuDebugReason';
   const DEBUG_MODE_KEY = 'gwuDebugMode';
   const DEBUG_ERROR_KEY = 'gwuDebugError';
+  const SETTINGS_STORAGE_KEY = 'gwuSettings';
+  const SETTINGS_BUTTON_ID = 'gwu-settings-button';
+  const SETTINGS_PANEL_ID = 'gwu-settings-panel';
+  const SETTINGS_STYLE_ID = 'gwu-settings-style';
+  const DEFAULT_SETTINGS = Object.freeze({
+    cleanCopy: true,
+    copyAsMarkdown: true,
+    codeBlockCopyFix: true,
+    watermarkRemoval: true
+  });
+  const SETTINGS_OPTIONS = [
+    {
+      key: 'cleanCopy',
+      label: 'Clean Copy',
+      description: 'Strip wrapper labels from response selection copy.'
+    },
+    {
+      key: 'copyAsMarkdown',
+      label: 'Copy as Markdown',
+      description: 'Keep the Markdown clipboard type and the Copy Markdown action.'
+    },
+    {
+      key: 'codeBlockCopyFix',
+      label: 'Code Block Copy Fix',
+      description: 'Clean code-block copy output by removing gutter noise and line numbers.'
+    },
+    {
+      key: 'watermarkRemoval',
+      label: 'Watermark Removal',
+      description: 'Keep NanoBanana image watermark removal active.'
+    }
+  ];
 
   const EMBEDDED_ALPHA_MAP_LENGTHS = {
     48: 48 * 48,
@@ -78,11 +110,88 @@
   const ALPHA_GAIN_CANDIDATES = [1, 1.12, 1.28, 1.45, 1.6, 1.85];
   const decodedAlphaMaps = new Map();
   let runtimeDebug = null;
+  let runtimeSettings = null;
+  const settingsListeners = new Set();
 
   function emitRuntimeDebugEvent(type, details) {
     if (runtimeDebug && typeof runtimeDebug.record === 'function') {
       runtimeDebug.record(type, details);
     }
+  }
+
+  function sanitizeSettings(value) {
+    const nextSettings = Object.assign({}, DEFAULT_SETTINGS);
+    if (!value || typeof value !== 'object') {
+      return nextSettings;
+    }
+
+    for (const key of Object.keys(DEFAULT_SETTINGS)) {
+      if (typeof value[key] === 'boolean') {
+        nextSettings[key] = value[key];
+      }
+    }
+
+    return nextSettings;
+  }
+
+  function loadStoredSettings() {
+    if (typeof localStorage === 'undefined') {
+      return sanitizeSettings();
+    }
+
+    try {
+      const rawValue = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (!rawValue) {
+        return sanitizeSettings();
+      }
+      return sanitizeSettings(JSON.parse(rawValue));
+    } catch {
+      return sanitizeSettings();
+    }
+  }
+
+  function getSettings() {
+    if (!runtimeSettings) {
+      runtimeSettings = loadStoredSettings();
+    }
+    return runtimeSettings;
+  }
+
+  function isFeatureEnabled(key) {
+    const settings = getSettings();
+    return settings[key] !== false;
+  }
+
+  function subscribeToSettings(listener) {
+    if (typeof listener === 'function') {
+      settingsListeners.add(listener);
+    }
+  }
+
+  function notifySettingsListeners(settings) {
+    settingsListeners.forEach((listener) => {
+      try {
+        listener(settings);
+      } catch {
+        // Ignore UI sync failures so one listener does not break settings updates.
+      }
+    });
+  }
+
+  function updateSettings(patch) {
+    const nextSettings = sanitizeSettings(Object.assign({}, getSettings(), patch));
+    runtimeSettings = nextSettings;
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextSettings));
+      } catch {
+        // Ignore persistence failures, the in-memory settings still apply.
+      }
+    }
+
+    notifySettingsListeners(nextSettings);
+    return nextSettings;
   }
 
   function escapeRegExp(value) {
@@ -598,13 +707,23 @@
       return;
     }
 
+    const cleanCopyEnabled = isFeatureEnabled('cleanCopy');
+    const copyAsMarkdownEnabled = isFeatureEnabled('copyAsMarkdown');
+    if (!cleanCopyEnabled && !copyAsMarkdownEnabled) {
+      return;
+    }
+
     const sanitizedText = sanitizeLeadingResponseLabel(selectedText, label || '').trim();
-    const html = buildSanitizedSelectionHtml(selection.getRangeAt(0), label);
-    const markdown = buildSanitizedSelectionMarkdown(selection.getRangeAt(0), label);
+    const html = cleanCopyEnabled || copyAsMarkdownEnabled
+      ? buildSanitizedSelectionHtml(selection.getRangeAt(0), label)
+      : null;
+    const markdown = copyAsMarkdownEnabled
+      ? buildSanitizedSelectionMarkdown(selection.getRangeAt(0), label)
+      : '';
 
     event.preventDefault();
     event.stopImmediatePropagation();
-    event.clipboardData.setData('text/plain', sanitizedText || selectedText);
+    event.clipboardData.setData('text/plain', cleanCopyEnabled ? (sanitizedText || selectedText) : selectedText);
 
     if (markdown) {
       event.clipboardData.setData('text/markdown', markdown);
@@ -649,6 +768,13 @@
   function installCopyMarkdownButtons() {
     ensureCopyMarkdownStyles();
 
+    function syncButtonVisibility() {
+      const enabled = isFeatureEnabled('copyAsMarkdown');
+      document.querySelectorAll('[' + COPY_MARKDOWN_BUTTON_ATTRIBUTE + ']').forEach((button) => {
+        button.hidden = !enabled;
+      });
+    }
+
     function attachButton(responseContainer) {
       if (!responseContainer || responseContainer.querySelector('[' + COPY_MARKDOWN_BUTTON_ATTRIBUTE + ']')) {
         return;
@@ -665,7 +791,12 @@
       button.className = COPY_MARKDOWN_BUTTON_CLASS;
       button.setAttribute(COPY_MARKDOWN_BUTTON_ATTRIBUTE, 'true');
       button.textContent = 'Copy Markdown';
+      button.hidden = !isFeatureEnabled('copyAsMarkdown');
       button.addEventListener('click', async () => {
+        if (!isFeatureEnabled('copyAsMarkdown')) {
+          return;
+        }
+
         const payload = buildResponseCopyPayload(responseContainer, { preferMarkdownPlainText: true });
         if (!payload) {
           return;
@@ -723,6 +854,7 @@
       }
 
       processRoot(document);
+      syncButtonVisibility();
       observer.observe(root, { childList: true, subtree: true });
     }
 
@@ -732,6 +864,7 @@
     }
 
     observe();
+    subscribeToSettings(syncButtonVisibility);
   }
 
   function normalizeCodeText(text) {
@@ -830,6 +963,10 @@
     document.addEventListener(
       'click',
       async (event) => {
+        if (!isFeatureEnabled('codeBlockCopyFix')) {
+          return;
+        }
+
         const target = event.target instanceof Element ? event.target : null;
         const button = target && typeof target.closest === 'function'
           ? target.closest(CODE_COPY_ACTION_SELECTOR)
@@ -855,6 +992,186 @@
       },
       true
     );
+  }
+
+  function ensureSettingsStyles() {
+    if (typeof document === 'undefined' || document.getElementById(SETTINGS_STYLE_ID)) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = SETTINGS_STYLE_ID;
+    style.textContent = [
+      '#' + SETTINGS_BUTTON_ID + ' {',
+      '  position: fixed;',
+      '  right: 1rem;',
+      '  bottom: 1rem;',
+      '  z-index: 2147483646;',
+      '  width: 2.75rem;',
+      '  height: 2.75rem;',
+      '  border-radius: 999px;',
+      '  border: 1px solid rgba(60, 64, 67, 0.16);',
+      '  background: rgba(255, 255, 255, 0.95);',
+      '  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);',
+      '  cursor: pointer;',
+      '  font-size: 1.2rem;',
+      '}',
+      '#' + SETTINGS_PANEL_ID + ' {',
+      '  position: fixed;',
+      '  right: 1rem;',
+      '  bottom: 4.25rem;',
+      '  width: min(24rem, calc(100vw - 2rem));',
+      '  max-height: min(70vh, 34rem);',
+      '  overflow: auto;',
+      '  z-index: 2147483646;',
+      '  border-radius: 1rem;',
+      '  border: 1px solid rgba(60, 64, 67, 0.16);',
+      '  background: rgba(255, 255, 255, 0.98);',
+      '  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);',
+      '  padding: 1rem;',
+      '}',
+      '#' + SETTINGS_PANEL_ID + '[hidden] {',
+      '  display: none;',
+      '}',
+      '#' + SETTINGS_PANEL_ID + ' h2 {',
+      '  margin: 0 0 0.35rem;',
+      '  font-size: 1rem;',
+      '}',
+      '#' + SETTINGS_PANEL_ID + ' p {',
+      '  margin: 0 0 1rem;',
+      '  color: #5f6368;',
+      '  font-size: 0.9rem;',
+      '}',
+      '.gwu-settings-option {',
+      '  display: grid;',
+      '  grid-template-columns: auto 1fr;',
+      '  gap: 0.75rem;',
+      '  align-items: start;',
+      '  padding: 0.7rem 0;',
+      '  border-top: 1px solid rgba(60, 64, 67, 0.08);',
+      '}',
+      '.gwu-settings-option:first-of-type {',
+      '  border-top: none;',
+      '}',
+      '.gwu-settings-option strong {',
+      '  display: block;',
+      '  margin-bottom: 0.15rem;',
+      '}',
+      '.gwu-settings-option span {',
+      '  color: #5f6368;',
+      '  font-size: 0.85rem;',
+      '}'
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  function installSettingsPanel() {
+    ensureSettingsStyles();
+
+    function syncPanelState() {
+      const panel = document.getElementById(SETTINGS_PANEL_ID);
+      if (!panel) {
+        return;
+      }
+
+      const settings = getSettings();
+      SETTINGS_OPTIONS.forEach((option) => {
+        const input = panel.querySelector('input[name="' + option.key + '"]');
+        if (input) {
+          input.checked = settings[option.key] !== false;
+        }
+      });
+    }
+
+    function closePanel() {
+      const panel = document.getElementById(SETTINGS_PANEL_ID);
+      if (panel) {
+        panel.hidden = true;
+      }
+    }
+
+    function togglePanel() {
+      const panel = document.getElementById(SETTINGS_PANEL_ID);
+      if (!panel) {
+        return;
+      }
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) {
+        syncPanelState();
+      }
+    }
+
+    function ensureUi() {
+      if (!document.body || document.getElementById(SETTINGS_BUTTON_ID)) {
+        return;
+      }
+
+      const button = document.createElement('button');
+      button.id = SETTINGS_BUTTON_ID;
+      button.type = 'button';
+      button.title = 'Gemini Web Utility settings';
+      button.setAttribute('aria-label', 'Gemini Web Utility settings');
+      button.textContent = '⚙';
+      button.addEventListener('click', togglePanel);
+
+      const panel = document.createElement('section');
+      panel.id = SETTINGS_PANEL_ID;
+      panel.hidden = true;
+      panel.innerHTML = '<h2>Gemini Web Utility</h2><p>Enable or disable shipped features. Changes apply immediately where possible.</p>';
+
+      SETTINGS_OPTIONS.forEach((option) => {
+        const row = document.createElement('label');
+        row.className = 'gwu-settings-option';
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.name = option.key;
+        input.checked = getSettings()[option.key] !== false;
+        input.addEventListener('change', () => {
+          updateSettings({ [option.key]: input.checked });
+        });
+
+        const text = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = option.label;
+        const description = document.createElement('span');
+        description.textContent = option.description;
+        text.appendChild(title);
+        text.appendChild(description);
+
+        row.appendChild(input);
+        row.appendChild(text);
+        panel.appendChild(row);
+      });
+
+      document.body.appendChild(button);
+      document.body.appendChild(panel);
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          closePanel();
+        }
+      });
+
+      document.addEventListener('click', (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target) {
+          return;
+        }
+        if (target.closest('#' + SETTINGS_PANEL_ID) || target.closest('#' + SETTINGS_BUTTON_ID)) {
+          return;
+        }
+        closePanel();
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', ensureUi, { once: true });
+    } else {
+      ensureUi();
+    }
+
+    subscribeToSettings(syncPanelState);
   }
 
   function decodeBase64(base64) {
@@ -1698,6 +2015,10 @@
     const cache = new Map();
 
     pageWindow.fetch = async (...args) => {
+      if (!isFeatureEnabled('watermarkRemoval')) {
+        return originalFetch(...args);
+      }
+
       if (shouldBypassHook(args)) {
         return originalFetch(...args);
       }
@@ -2086,7 +2407,7 @@
     }
 
     const debugApi = {
-      version: '0.2.4',
+      version: '0.5.0',
       events: [],
       clear() {
         this.events.length = 0;
@@ -2156,6 +2477,10 @@
     const batchProcessor = createRootBatchProcessor(processRoot);
 
     async function processImage(imageElement) {
+      if (!isFeatureEnabled('watermarkRemoval')) {
+        return;
+      }
+
       const candidate = describeGeminiImageCandidate(imageElement);
       const imageId = getDebugImageId(imageElement);
       setImageDebugMetadata(imageElement, {
@@ -2367,6 +2692,7 @@
 
   const exported = {
     sanitizeLeadingResponseLabel,
+    sanitizeSettings,
     convertHtmlTreeToMarkdown,
     buildResponseMarkdown,
     extractCodeTextFromBlock,
@@ -2391,6 +2717,7 @@
   }
 
   document.addEventListener('copy', handleCopy, true);
+  installSettingsPanel();
   installCopyMarkdownButtons();
   installCodeBlockCopyFix();
   installGeminiDownloadHook();
