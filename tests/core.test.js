@@ -5,6 +5,7 @@ const {
   sanitizeLeadingResponseLabel,
   convertHtmlTreeToMarkdown,
   buildResponseMarkdown,
+  extractCodeTextFromBlock,
   classifyGeminiAssetPath,
   classifyGeminiAssetUrl,
   normalizeGoogleusercontentImageUrl,
@@ -19,8 +20,75 @@ const {
 function textNode(text) {
   return {
     nodeType: 3,
-    textContent: text
+    textContent: text,
+    cloneNode() {
+      return textNode(text);
+    }
   };
+}
+
+function matchesSimpleSelector(node, selector) {
+  if (!node || node.nodeType !== 1) {
+    return false;
+  }
+
+  if (selector.startsWith('.')) {
+    const className = (node.className || '').split(/\s+/).filter(Boolean);
+    return className.includes(selector.slice(1));
+  }
+
+  if (selector.startsWith('[') && selector.endsWith(']')) {
+    const attrName = selector.slice(1, -1).split('=')[0];
+    return Boolean(node.getAttribute(attrName));
+  }
+
+  return node.tagName.toLowerCase() === selector.toLowerCase();
+}
+
+function querySelectorAllFrom(node, selector) {
+  const selectors = selector.split(',').map((part) => part.trim()).filter(Boolean);
+  const results = [];
+
+  function visit(current) {
+    if (!current || current.nodeType !== 1) {
+      return;
+    }
+
+    for (const rawSelector of selectors) {
+      const parts = rawSelector.split(/\s+/).filter(Boolean);
+      if (parts.length === 1 && matchesSimpleSelector(current, parts[0])) {
+        results.push(current);
+        break;
+      }
+
+      if (parts.length === 2 && matchesSimpleSelector(current, parts[1])) {
+        let parent = current.parentNode || null;
+        while (parent) {
+          if (matchesSimpleSelector(parent, parts[0])) {
+            results.push(current);
+            break;
+          }
+          parent = parent.parentNode || null;
+        }
+      }
+    }
+
+    for (const child of current.childNodes || []) {
+      if (child && child.nodeType === 1) {
+        child.parentNode = current;
+      }
+      visit(child);
+    }
+  }
+
+  for (const child of node.childNodes || []) {
+    if (child && child.nodeType === 1) {
+      child.parentNode = node;
+    }
+    visit(child);
+  }
+
+  return results;
 }
 
 function elementNode(tagName, options, children) {
@@ -41,6 +109,19 @@ function elementNode(tagName, options, children) {
         return className;
       }
       return attributes[name] || '';
+    },
+    querySelector(selector) {
+      return querySelectorAllFrom(node, selector)[0] || null;
+    },
+    querySelectorAll(selector) {
+      return querySelectorAllFrom(node, selector);
+    },
+    remove() {
+      if (!node.parentNode || !Array.isArray(node.parentNode.childNodes)) {
+        return;
+      }
+      node.parentNode.childNodes = node.parentNode.childNodes.filter((child) => child !== node);
+      node.parentNode.textContent = node.parentNode.childNodes.map((child) => child.textContent || '').join('');
     },
     cloneNode(deep) {
       if (!deep) {
@@ -272,6 +353,33 @@ test('builds full-response markdown from the Gemini content root', () => {
   };
 
   assert.equal(buildResponseMarkdown(responseContainer), 'Line one\n\nLine two');
+});
+
+test('extracts code text without line-number gutter nodes', () => {
+  const codeBlock = elementNode('pre', {}, [
+    elementNode('code', {}, [
+      elementNode('span', { className: 'line-number' }, [textNode('1')]),
+      textNode('const one = 1;\n'),
+      elementNode('span', { className: 'line-number' }, [textNode('2')]),
+      textNode('const two = 2;')
+    ])
+  ]);
+
+  assert.equal(
+    extractCodeTextFromBlock(codeBlock),
+    "const one = 1;\nconst two = 2;"
+  );
+});
+
+test('strips textual line-number prefixes when most lines match the pattern', () => {
+  const codeBlock = elementNode('pre', {}, [
+    textNode('1  const one = 1;\n2  const two = 2;')
+  ]);
+
+  assert.equal(
+    extractCodeTextFromBlock(codeBlock),
+    "const one = 1;\nconst two = 2;"
+  );
 });
 
 test('resolves explicit and stable candidate image URLs', () => {

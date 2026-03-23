@@ -29,9 +29,16 @@
     'button[aria-label*="Copy"]',
     'button[title*="Copy"]'
   ].join(', ');
+  const CODE_COPY_ACTION_SELECTOR = [
+    'button[aria-label*="Copy"]',
+    'button[title*="Copy"]',
+    'button[data-test-id*="code"]',
+    '[role="button"][aria-label*="Copy"]'
+  ].join(', ');
   const COPY_MARKDOWN_BUTTON_CLASS = 'gwu-copy-markdown-button';
   const COPY_MARKDOWN_BUTTON_ATTRIBUTE = 'data-gwu-copy-markdown';
   const COPY_MARKDOWN_STYLE_ID = 'gwu-copy-markdown-style';
+  const MAX_CODE_COPY_SCOPE_DEPTH = 5;
 
   const GEMINI_IMAGE_CONTAINER_SELECTOR = 'generated-image, .generated-image-container';
   const GEMINI_IMAGE_QUERY_SELECTOR = GEMINI_IMAGE_CONTAINER_SELECTOR
@@ -725,6 +732,129 @@
     }
 
     observe();
+  }
+
+  function normalizeCodeText(text) {
+    return String(text || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\u00a0/g, ' ')
+      .replace(/^\n+|\n+$/g, '');
+  }
+
+  function stripLikelyLineNumbers(text) {
+    const lines = normalizeCodeText(text).split('\n');
+    const numberedLines = lines.filter((line) => /^\s*\d+(?:\s{2,}|\t+)\S/.test(line));
+    if (lines.length === 0 || numberedLines.length / lines.length < 0.6) {
+      return normalizeCodeText(text);
+    }
+
+    return normalizeCodeText(
+      lines
+        .map((line) => line.replace(/^\s*\d+(?:\s{2,}|\t+)/, ''))
+        .join('\n')
+    );
+  }
+
+  function removeLikelyLineNumberNodes(root) {
+    if (!root || typeof root.querySelectorAll !== 'function') {
+      return;
+    }
+
+    const selectors = [
+      '.line-number',
+      '.line-numbers',
+      '.gutter',
+      '[data-line-number]',
+      '[data-code-copy-gutter]',
+      '[aria-hidden="true"][data-line-number]'
+    ].join(', ');
+
+    root.querySelectorAll(selectors).forEach((node) => node.remove());
+  }
+
+  function findAssociatedCodeBlock(button) {
+    if (!button || typeof button.closest !== 'function') {
+      return null;
+    }
+
+    const responseContainer = button.closest(RESPONSE_CONTAINER_SELECTOR);
+    let scope = button.parentElement;
+    let depth = 0;
+
+    while (scope && depth < MAX_CODE_COPY_SCOPE_DEPTH) {
+      const candidate = scope.querySelector('pre code, pre');
+      if (candidate && scope !== responseContainer) {
+        return candidate;
+      }
+      scope = scope.parentElement;
+      depth += 1;
+    }
+
+    return null;
+  }
+
+  function extractCodeTextFromBlock(block) {
+    if (!block) {
+      return '';
+    }
+
+    const tagName = getNodeTagName(block);
+    if (tagName === 'code' && typeof block.cloneNode === 'function') {
+      const codeClone = block.cloneNode(true);
+      removeLikelyLineNumberNodes(codeClone);
+      return stripLikelyLineNumbers(getNodeText(codeClone));
+    }
+
+    if (typeof block.querySelector === 'function') {
+      const codeNode = block.querySelector('code');
+      if (codeNode && typeof codeNode.cloneNode === 'function') {
+        const codeClone = codeNode.cloneNode(true);
+        removeLikelyLineNumberNodes(codeClone);
+        const codeText = stripLikelyLineNumbers(getNodeText(codeClone));
+        if (codeText) {
+          return codeText;
+        }
+      }
+    }
+
+    if (typeof block.cloneNode === 'function') {
+      const blockClone = block.cloneNode(true);
+      removeLikelyLineNumberNodes(blockClone);
+      return stripLikelyLineNumbers(getNodeText(blockClone));
+    }
+
+    return stripLikelyLineNumbers(getNodeText(block));
+  }
+
+  function installCodeBlockCopyFix() {
+    document.addEventListener(
+      'click',
+      async (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const button = target && typeof target.closest === 'function'
+          ? target.closest(CODE_COPY_ACTION_SELECTOR)
+          : null;
+
+        if (!button || button.hasAttribute(COPY_MARKDOWN_BUTTON_ATTRIBUTE)) {
+          return;
+        }
+
+        const codeBlock = findAssociatedCodeBlock(button);
+        const codeText = extractCodeTextFromBlock(codeBlock);
+        if (!codeText) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        try {
+          await writeClipboardPayload({ text: codeText });
+        } catch {
+          // Fall back to native behavior only when our write path fails before interception.
+        }
+      },
+      true
+    );
   }
 
   function decodeBase64(base64) {
@@ -2239,6 +2369,7 @@
     sanitizeLeadingResponseLabel,
     convertHtmlTreeToMarkdown,
     buildResponseMarkdown,
+    extractCodeTextFromBlock,
     classifyGeminiAssetPath,
     classifyGeminiAssetUrl,
     isGeminiGeneratedAssetUrl,
@@ -2261,6 +2392,7 @@
 
   document.addEventListener('copy', handleCopy, true);
   installCopyMarkdownButtons();
+  installCodeBlockCopyFix();
   installGeminiDownloadHook();
   installPageImageReplacement();
 })();

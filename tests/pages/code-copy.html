@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gemini Code Copy Fixture</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 2rem;
+    }
+
+    .response-container {
+      border: 1px solid #dadce0;
+      border-radius: 1rem;
+      padding: 1rem;
+      max-width: 48rem;
+    }
+
+    .code-block {
+      border: 1px solid #e0e0e0;
+      border-radius: 0.75rem;
+      overflow: hidden;
+      margin-top: 1rem;
+    }
+
+    .code-header {
+      display: flex;
+      justify-content: flex-end;
+      padding: 0.5rem;
+      background: #f8f9fa;
+    }
+
+    pre {
+      margin: 0;
+      padding: 1rem;
+      background: #111827;
+      color: #f9fafb;
+      font-family: monospace;
+    }
+
+    .line-number {
+      color: #9ca3af;
+      display: inline-block;
+      min-width: 1.5rem;
+      user-select: none;
+    }
+  </style>
+  <script>
+    window.__gwuClipboard = { last: null };
+
+    window.ClipboardItem = class ClipboardItem {
+      constructor(data) {
+        this.data = data;
+      }
+    };
+
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        async write(items) {
+          const item = items[0];
+          const out = {};
+          for (const [type, blob] of Object.entries(item.data || {})) {
+            out[type] = await blob.text();
+          }
+          window.__gwuClipboard.last = out;
+        },
+        async writeText(text) {
+          window.__gwuClipboard.last = { 'text/plain': text };
+        }
+      }
+    });
+
+    window.getLastClipboardWrite = function getLastClipboardWrite() {
+      return window.__gwuClipboard.last;
+    };
+  </script>
+</head>
+<body>
+  <div class="response-container">
+    <h2>Gemini said</h2>
+    <div class="markdown">
+      <div class="code-block">
+        <div class="code-header">
+          <button aria-label="Copy code">Copy code</button>
+        </div>
+        <pre><code><span class="line-number">1</span>const one = 1;
+<span class="line-number">2</span>const two = 2;</code></pre>
+      </div>
+    </div>
+  </div>
+  <script src="../../gemini-web-utility.user.js"></script>
+</body>
+</html>
