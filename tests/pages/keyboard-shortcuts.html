@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gemini Keyboard Shortcuts Fixture</title>
+</head>
+<body>
+  <button data-gwu-action="new-chat" id="new-chat">New chat</button>
+  <button data-gwu-action="stop" id="stop">Stop</button>
+  <button data-gwu-action="submit" id="submit">Submit</button>
+  <div id="composer" contenteditable="true" style="border:1px solid #ccc; padding:0.5rem; margin-top:1rem;">Type here</div>
+  <output id="status">idle</output>
+  <script>
+    localStorage.removeItem('gwuSettings');
+    const status = document.getElementById('status');
+    document.getElementById('new-chat').addEventListener('click', () => {
+      status.textContent = 'new-chat';
+    });
+    document.getElementById('stop').addEventListener('click', () => {
+      status.textContent = 'stop';
+    });
+    document.getElementById('submit').addEventListener('click', () => {
+      status.textContent = 'submit';
+    });
+    window.getShortcutStatus = function getShortcutStatus() {
+      return {
+        status: status.textContent,
+        settings: localStorage.getItem('gwuSettings')
+      };
+    };
+  </script>
+  <script src="../../gemini-web-utility.user.js"></script>
+</body>
+</html>

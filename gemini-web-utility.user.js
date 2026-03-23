@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.5.0
+// @version      0.6.0
 // @description  Utilities for the Gemini web app: clean copy and NanoBanana watermark removal.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -67,7 +67,11 @@
     cleanCopy: true,
     copyAsMarkdown: true,
     codeBlockCopyFix: true,
-    watermarkRemoval: true
+    watermarkRemoval: true,
+    keyboardShortcutsEnabled: true,
+    shortcutNewChat: 'Ctrl+Shift+N',
+    shortcutSubmit: 'Ctrl+Enter',
+    shortcutStop: 'Escape'
   });
   const SETTINGS_OPTIONS = [
     {
@@ -89,7 +93,17 @@
       key: 'watermarkRemoval',
       label: 'Watermark Removal',
       description: 'Keep NanoBanana image watermark removal active.'
+    },
+    {
+      key: 'keyboardShortcutsEnabled',
+      label: 'Keyboard Shortcuts',
+      description: 'Enable global shortcuts for new chat, submit, and stop.'
     }
+  ];
+  const SHORTCUT_OPTIONS = [
+    { key: 'shortcutNewChat', label: 'New chat' },
+    { key: 'shortcutSubmit', label: 'Submit prompt' },
+    { key: 'shortcutStop', label: 'Stop generation' }
   ];
 
   const EMBEDDED_ALPHA_MAP_LENGTHS = {
@@ -126,8 +140,13 @@
     }
 
     for (const key of Object.keys(DEFAULT_SETTINGS)) {
-      if (typeof value[key] === 'boolean') {
+      if (typeof DEFAULT_SETTINGS[key] === 'boolean' && typeof value[key] === 'boolean') {
         nextSettings[key] = value[key];
+        continue;
+      }
+
+      if (typeof DEFAULT_SETTINGS[key] === 'string' && typeof value[key] === 'string' && value[key].trim()) {
+        nextSettings[key] = value[key].trim();
       }
     }
 
@@ -192,6 +211,83 @@
 
     notifySettingsListeners(nextSettings);
     return nextSettings;
+  }
+
+  function normalizeShortcutKey(key) {
+    const raw = String(key || '').trim();
+    if (!raw) {
+      return '';
+    }
+
+    const lowered = raw.toLowerCase();
+    if (lowered === 'ctrl' || lowered === 'control') {
+      return 'Control';
+    }
+    if (lowered === 'cmd' || lowered === 'meta' || lowered === 'command') {
+      return 'Meta';
+    }
+    if (lowered === 'alt' || lowered === 'option') {
+      return 'Alt';
+    }
+    if (lowered === 'shift') {
+      return 'Shift';
+    }
+    if (lowered === 'esc') {
+      return 'Escape';
+    }
+    if (lowered === 'return') {
+      return 'Enter';
+    }
+    if (raw.length === 1) {
+      return raw.toUpperCase();
+    }
+    return raw[0].toUpperCase() + raw.slice(1);
+  }
+
+  function parseShortcutDefinition(value) {
+    const parts = String(value || '')
+      .split('+')
+      .map((part) => normalizeShortcutKey(part))
+      .filter(Boolean);
+
+    const definition = {
+      ctrl: false,
+      alt: false,
+      shift: false,
+      meta: false,
+      key: ''
+    };
+
+    for (const part of parts) {
+      if (part === 'Control') {
+        definition.ctrl = true;
+      } else if (part === 'Alt') {
+        definition.alt = true;
+      } else if (part === 'Shift') {
+        definition.shift = true;
+      } else if (part === 'Meta') {
+        definition.meta = true;
+      } else {
+        definition.key = part;
+      }
+    }
+
+    return definition;
+  }
+
+  function matchShortcutEvent(event, definition) {
+    if (!event || !definition || !definition.key) {
+      return false;
+    }
+
+    const eventKey = normalizeShortcutKey(event.key);
+    return (
+      eventKey === definition.key &&
+      Boolean(event.ctrlKey) === Boolean(definition.ctrl) &&
+      Boolean(event.altKey) === Boolean(definition.alt) &&
+      Boolean(event.shiftKey) === Boolean(definition.shift) &&
+      Boolean(event.metaKey) === Boolean(definition.meta)
+    );
   }
 
   function escapeRegExp(value) {
@@ -1042,6 +1138,10 @@
       '  color: #5f6368;',
       '  font-size: 0.9rem;',
       '}',
+      '#' + SETTINGS_PANEL_ID + ' h3 {',
+      '  margin: 1rem 0 0.5rem;',
+      '  font-size: 0.9rem;',
+      '}',
       '.gwu-settings-option {',
       '  display: grid;',
       '  grid-template-columns: auto 1fr;',
@@ -1060,6 +1160,17 @@
       '.gwu-settings-option span {',
       '  color: #5f6368;',
       '  font-size: 0.85rem;',
+      '}',
+      '.gwu-shortcut-field {',
+      '  display: grid;',
+      '  gap: 0.35rem;',
+      '  margin-top: 0.75rem;',
+      '}',
+      '.gwu-shortcut-field input {',
+      '  border: 1px solid rgba(60, 64, 67, 0.16);',
+      '  border-radius: 0.6rem;',
+      '  padding: 0.55rem 0.65rem;',
+      '  font: inherit;',
       '}'
     ].join('\n');
     document.head.appendChild(style);
@@ -1079,6 +1190,13 @@
         const input = panel.querySelector('input[name="' + option.key + '"]');
         if (input) {
           input.checked = settings[option.key] !== false;
+        }
+      });
+
+      SHORTCUT_OPTIONS.forEach((option) => {
+        const input = panel.querySelector('input[name="' + option.key + '"]');
+        if (input) {
+          input.value = settings[option.key] || DEFAULT_SETTINGS[option.key];
         }
       });
     }
@@ -1144,6 +1262,31 @@
         panel.appendChild(row);
       });
 
+      const shortcutsTitle = document.createElement('h3');
+      shortcutsTitle.textContent = 'Shortcuts';
+      panel.appendChild(shortcutsTitle);
+
+      SHORTCUT_OPTIONS.forEach((option) => {
+        const wrapper = document.createElement('label');
+        wrapper.className = 'gwu-shortcut-field';
+
+        const title = document.createElement('strong');
+        title.textContent = option.label;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.name = option.key;
+        input.value = getSettings()[option.key] || DEFAULT_SETTINGS[option.key];
+        input.placeholder = DEFAULT_SETTINGS[option.key];
+        input.addEventListener('change', () => {
+          updateSettings({ [option.key]: input.value.trim() || DEFAULT_SETTINGS[option.key] });
+        });
+
+        wrapper.appendChild(title);
+        wrapper.appendChild(input);
+        panel.appendChild(wrapper);
+      });
+
       document.body.appendChild(button);
       document.body.appendChild(panel);
 
@@ -1172,6 +1315,116 @@
     }
 
     subscribeToSettings(syncPanelState);
+  }
+
+  function isEditableTarget(target) {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+
+    const tagName = getNodeTagName(target);
+    return (
+      tagName === 'textarea' ||
+      tagName === 'input' ||
+      Boolean(target.isContentEditable) ||
+      Boolean(target.closest('[contenteditable="true"]'))
+    );
+  }
+
+  function findShortcutActionElement(action) {
+    const selectorsByAction = {
+      newChat: [
+        '[data-gwu-action="new-chat"]',
+        'button[aria-label*="New chat"]',
+        'a[aria-label*="New chat"]',
+        'button[title*="New chat"]',
+        'a[href="/app"]'
+      ],
+      submit: [
+        '[data-gwu-action="submit"]',
+        'button[aria-label*="Send"]',
+        'button[aria-label*="Submit"]',
+        'button[title*="Send"]'
+      ],
+      stop: [
+        '[data-gwu-action="stop"]',
+        'button[aria-label*="Stop"]',
+        'button[title*="Stop"]'
+      ]
+    };
+
+    const selectors = selectorsByAction[action] || [];
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        return element;
+      }
+    }
+
+    return null;
+  }
+
+  function installKeyboardShortcuts() {
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (!isFeatureEnabled('keyboardShortcutsEnabled') || event.defaultPrevented || event.repeat) {
+          return;
+        }
+
+        const target = event.target instanceof Element ? event.target : null;
+        const panel = document.getElementById(SETTINGS_PANEL_ID);
+        if (panel && !panel.hidden && target && target.closest('#' + SETTINGS_PANEL_ID)) {
+          return;
+        }
+
+        const settings = getSettings();
+        const shortcuts = [
+          {
+            action: 'newChat',
+            definition: parseShortcutDefinition(settings.shortcutNewChat),
+            requiresEditable: false
+          },
+          {
+            action: 'submit',
+            definition: parseShortcutDefinition(settings.shortcutSubmit),
+            requiresEditable: true
+          },
+          {
+            action: 'stop',
+            definition: parseShortcutDefinition(settings.shortcutStop),
+            requiresEditable: false
+          }
+        ];
+
+        const editableTarget = isEditableTarget(target);
+
+        for (const shortcut of shortcuts) {
+          if (!matchShortcutEvent(event, shortcut.definition)) {
+            continue;
+          }
+
+          if (shortcut.requiresEditable && !editableTarget) {
+            return;
+          }
+
+          if (!shortcut.requiresEditable && editableTarget) {
+            return;
+          }
+
+          const actionElement = findShortcutActionElement(shortcut.action);
+          if (!actionElement || typeof actionElement.click !== 'function') {
+            return;
+          }
+
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          actionElement.click();
+          return;
+        }
+      },
+      true
+    );
   }
 
   function decodeBase64(base64) {
@@ -2407,7 +2660,7 @@
     }
 
     const debugApi = {
-      version: '0.5.0',
+      version: '0.6.0',
       events: [],
       clear() {
         this.events.length = 0;
@@ -2693,6 +2946,8 @@
   const exported = {
     sanitizeLeadingResponseLabel,
     sanitizeSettings,
+    parseShortcutDefinition,
+    matchShortcutEvent,
     convertHtmlTreeToMarkdown,
     buildResponseMarkdown,
     extractCodeTextFromBlock,
@@ -2718,6 +2973,7 @@
 
   document.addEventListener('copy', handleCopy, true);
   installSettingsPanel();
+  installKeyboardShortcuts();
   installCopyMarkdownButtons();
   installCodeBlockCopyFix();
   installGeminiDownloadHook();

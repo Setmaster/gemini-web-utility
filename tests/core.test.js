@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const {
   sanitizeLeadingResponseLabel,
   sanitizeSettings,
+  parseShortcutDefinition,
+  matchShortcutEvent,
   convertHtmlTreeToMarkdown,
   buildResponseMarkdown,
   extractCodeTextFromBlock,
@@ -226,14 +228,55 @@ test('sanitizes settings payloads against known defaults', () => {
     sanitizeSettings({
       cleanCopy: false,
       copyAsMarkdown: true,
+      shortcutSubmit: 'Shift+Enter',
       unknownSetting: false
     }),
     {
       cleanCopy: false,
       copyAsMarkdown: true,
       codeBlockCopyFix: true,
-      watermarkRemoval: true
+      watermarkRemoval: true,
+      keyboardShortcutsEnabled: true,
+      shortcutNewChat: 'Ctrl+Shift+N',
+      shortcutSubmit: 'Shift+Enter',
+      shortcutStop: 'Escape'
     }
+  );
+});
+
+test('parses configurable keyboard shortcuts', () => {
+  assert.deepEqual(parseShortcutDefinition('Ctrl+Shift+N'), {
+    ctrl: true,
+    alt: false,
+    shift: true,
+    meta: false,
+    key: 'N'
+  });
+
+  assert.deepEqual(parseShortcutDefinition('Escape'), {
+    ctrl: false,
+    alt: false,
+    shift: false,
+    meta: false,
+    key: 'Escape'
+  });
+});
+
+test('matches keyboard events against shortcut definitions', () => {
+  assert.equal(
+    matchShortcutEvent(
+      { key: 'Enter', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false },
+      parseShortcutDefinition('Ctrl+Enter')
+    ),
+    true
+  );
+
+  assert.equal(
+    matchShortcutEvent(
+      { key: 'Enter', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false },
+      parseShortcutDefinition('Ctrl+Enter')
+    ),
+    false
   );
 });
 
