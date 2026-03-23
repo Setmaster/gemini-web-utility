@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.2.0
+// @version      0.2.4
 // @description  Utilities for the Gemini web app: clean copy and NanoBanana watermark removal.
 // @match        https://gemini.google.com/*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @run-at       document-start
 // ==/UserScript==
 
@@ -25,11 +26,20 @@
     .split(',')
     .map((selector) => selector.trim() + ' img')
     .join(', ');
-  const OBSERVED_IMAGE_ATTRIBUTES = ['src', 'srcset'];
+  const OBSERVED_IMAGE_ATTRIBUTES = ['src', 'srcset', 'data-gwu-source-url'];
   const IMAGE_STATE_KEY = 'gwuImageState';
   const IMAGE_SOURCE_KEY = 'gwuImageSource';
   const IMAGE_OBJECT_URL_KEY = 'gwuObjectUrl';
   const STABLE_SOURCE_KEY = 'gwuStableSource';
+  const EXPLICIT_SOURCE_KEY = 'gwuSourceUrl';
+  const MIN_GEMINI_IMAGE_EDGE = 128;
+  const MAX_CONTAINER_SEARCH_DEPTH = 4;
+  const MIN_ACTION_BUTTONS = 2;
+  const DEBUG_EVENT_LIMIT = 300;
+  const DEBUG_IMAGE_ID_KEY = 'gwuDebugId';
+  const DEBUG_REASON_KEY = 'gwuDebugReason';
+  const DEBUG_MODE_KEY = 'gwuDebugMode';
+  const DEBUG_ERROR_KEY = 'gwuDebugError';
 
   const EMBEDDED_ALPHA_MAP_LENGTHS = {
     48: 48 * 48,
@@ -48,6 +58,13 @@
   const MIN_WATERMARK_SCORE = 0.18;
   const ALPHA_GAIN_CANDIDATES = [1, 1.12, 1.28, 1.45, 1.6, 1.85];
   const decodedAlphaMaps = new Map();
+  let runtimeDebug = null;
+
+  function emitRuntimeDebugEvent(type, details) {
+    if (runtimeDebug && typeof runtimeDebug.record === 'function') {
+      runtimeDebug.record(type, details);
+    }
+  }
 
   function escapeRegExp(value) {
     return value.replace(/[.*+?^{}$()|[\]\\]/g, '\\$&');
@@ -192,6 +209,30 @@
     }
 
     throw new Error('No base64 decoder available in current runtime');
+  }
+
+  function getPageWindow() {
+    if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
+      return unsafeWindow;
+    }
+
+    if (typeof window !== 'undefined') {
+      return window;
+    }
+
+    return null;
+  }
+
+  function getUserscriptRequestApi() {
+    if (typeof GM_xmlhttpRequest === 'function') {
+      return GM_xmlhttpRequest;
+    }
+
+    if (typeof GM !== 'undefined' && GM && typeof GM.xmlHttpRequest === 'function') {
+      return GM.xmlHttpRequest.bind(GM);
+    }
+
+    return null;
   }
 
   function getEmbeddedAlphaMap(size) {
@@ -644,6 +685,13 @@
       return '';
     }
 
+    const explicitSource = typeof image.dataset && typeof image.dataset[EXPLICIT_SOURCE_KEY] === 'string'
+      ? image.dataset[EXPLICIT_SOURCE_KEY].trim()
+      : '';
+    if (explicitSource) {
+      return explicitSource;
+    }
+
     const stableSource = typeof image.dataset && typeof image.dataset[STABLE_SOURCE_KEY] === 'string'
       ? image.dataset[STABLE_SOURCE_KEY].trim()
       : '';
@@ -657,22 +705,171 @@
     return currentSrc || src || stableSource;
   }
 
+  function hasMeaningfulGeminiImageSize(image) {
+    const size = getMediaEdgeSize(image);
+    return size.width >= MIN_GEMINI_IMAGE_EDGE || size.height >= MIN_GEMINI_IMAGE_EDGE;
+  }
+
+  function hasNearbyActionCluster(image) {
+    let current = image && image.parentElement ? image.parentElement : null;
+    let depth = 0;
+
+    while (current && depth < MAX_CONTAINER_SEARCH_DEPTH) {
+      const buttons = typeof current.querySelectorAll === 'function'
+        ? current.querySelectorAll('button, [role="button"]')
+        : [];
+      if ((buttons && buttons.length) >= MIN_ACTION_BUTTONS) {
+        return true;
+      }
+      current = current.parentElement || null;
+      depth += 1;
+    }
+
+    return false;
+  }
+
+  function shouldUseRenderedImageFallback(image) {
+    return hasMeaningfulGeminiImageSize(image) && hasNearbyActionCluster(image);
+  }
+
+  function resolveProcessingSourceKey(image) {
+    const sourceUrl = resolveCandidateImageUrl(image);
+    if (sourceUrl) {
+      return sourceUrl;
+    }
+
+    if (!shouldUseRenderedImageFallback(image)) {
+      return '';
+    }
+
+    const currentSrc = typeof image.currentSrc === 'string' ? image.currentSrc.trim() : '';
+    const src = typeof image.src === 'string' ? image.src.trim() : '';
+    const size = getMediaEdgeSize(image);
+    return 'rendered:' + (currentSrc || src || (size.width + 'x' + size.height));
+  }
+
+  function hasProcessedImageApplied(imageElement, sourceUrl) {
+    if (!imageElement || !imageElement.dataset) {
+      return false;
+    }
+
+    if (
+      imageElement.dataset[IMAGE_SOURCE_KEY] !== sourceUrl ||
+      imageElement.dataset[IMAGE_STATE_KEY] !== 'ready'
+    ) {
+      return false;
+    }
+
+    const objectUrl = imageElement.dataset[IMAGE_OBJECT_URL_KEY];
+    if (!objectUrl) {
+      return false;
+    }
+
+    const currentSrc = typeof imageElement.currentSrc === 'string' ? imageElement.currentSrc.trim() : '';
+    const src = typeof imageElement.src === 'string' ? imageElement.src.trim() : '';
+    return currentSrc === objectUrl || src === objectUrl;
+  }
+
   function isProcessableGeminiImageElement(image) {
     if (!(image instanceof HTMLImageElement)) {
       return false;
     }
 
     const sourceUrl = resolveCandidateImageUrl(image);
-    if (!isGeminiGeneratedAssetUrl(sourceUrl)) {
-      return false;
+    if (isGeminiGeneratedAssetUrl(sourceUrl)) {
+      if (image.closest(GEMINI_IMAGE_CONTAINER_SELECTOR)) {
+        return true;
+      }
+
+      return hasMeaningfulGeminiImageSize(image);
     }
 
-    if (image.closest(GEMINI_IMAGE_CONTAINER_SELECTOR)) {
-      return true;
-    }
+    return shouldUseRenderedImageFallback(image);
+  }
 
+  function describeGeminiImageCandidate(image) {
     const size = getMediaEdgeSize(image);
-    return size.width >= 128 || size.height >= 128;
+    const explicitSource = image && image.dataset && typeof image.dataset[EXPLICIT_SOURCE_KEY] === 'string'
+      ? image.dataset[EXPLICIT_SOURCE_KEY].trim()
+      : '';
+    const stableSource = image && image.dataset && typeof image.dataset[STABLE_SOURCE_KEY] === 'string'
+      ? image.dataset[STABLE_SOURCE_KEY].trim()
+      : '';
+    const currentSrc = image && typeof image.currentSrc === 'string' ? image.currentSrc.trim() : '';
+    const src = image && typeof image.src === 'string' ? image.src.trim() : '';
+    const sourceUrl = resolveCandidateImageUrl(image);
+    const sourceKey = resolveProcessingSourceKey(image);
+    const inGeminiContainer = Boolean(image && typeof image.closest === 'function' && image.closest(GEMINI_IMAGE_CONTAINER_SELECTOR));
+    const meaningfulSize = hasMeaningfulGeminiImageSize(image);
+    const hasActionCluster = hasNearbyActionCluster(image);
+    const usesRenderedFallback = meaningfulSize && hasActionCluster;
+    const isGeminiAsset = isGeminiGeneratedAssetUrl(sourceUrl);
+
+    let reason = 'not-processable';
+    if (isGeminiAsset && inGeminiContainer) {
+      reason = 'gemini-asset-container';
+    } else if (isGeminiAsset && meaningfulSize) {
+      reason = 'gemini-asset-size';
+    } else if (isGeminiAsset) {
+      reason = 'gemini-asset-too-small';
+    } else if (usesRenderedFallback) {
+      reason = 'rendered-fallback';
+    } else if (!meaningfulSize) {
+      reason = 'too-small';
+    } else if (!hasActionCluster) {
+      reason = 'missing-action-cluster';
+    }
+
+    return {
+      processable: isGeminiAsset ? (inGeminiContainer || meaningfulSize) : usesRenderedFallback,
+      reason,
+      size,
+      sourceUrl,
+      sourceKey,
+      currentSrc,
+      src,
+      explicitSource,
+      stableSource,
+      isGeminiAsset,
+      inGeminiContainer,
+      meaningfulSize,
+      hasActionCluster,
+      usesRenderedFallback,
+      inShadowRoot: typeof image.getRootNode === 'function' && image.getRootNode() instanceof ShadowRoot
+    };
+  }
+
+  function collectImagesInTree(root) {
+    const images = new Set();
+
+    function scan(node) {
+      if (!node) {
+        return;
+      }
+
+      if (node instanceof HTMLImageElement) {
+        images.add(node);
+      }
+
+      if (node instanceof ShadowRoot || (node && typeof node.querySelectorAll === 'function')) {
+        node.querySelectorAll('img').forEach((image) => images.add(image));
+      }
+
+      if (node && typeof node.querySelectorAll === 'function') {
+        node.querySelectorAll('*').forEach((element) => {
+          if (element.shadowRoot) {
+            scan(element.shadowRoot);
+          }
+        });
+      }
+
+      if (node.shadowRoot) {
+        scan(node.shadowRoot);
+      }
+    }
+
+    scan(root);
+    return Array.from(images);
   }
 
   function addCandidateImage(candidates, image) {
@@ -683,15 +880,12 @@
 
   function collectCandidateImages(root) {
     const candidates = new Set();
-    if (root instanceof HTMLImageElement) {
-      addCandidateImage(candidates, root);
-    }
-    if (root instanceof Element && root.matches && root.matches(GEMINI_IMAGE_CONTAINER_SELECTOR)) {
-      root.querySelectorAll('img').forEach((image) => addCandidateImage(candidates, image));
-    }
+    collectImagesInTree(root).forEach((image) => addCandidateImage(candidates, image));
+
     if (root && typeof root.querySelectorAll === 'function') {
       root.querySelectorAll(GEMINI_IMAGE_QUERY_SELECTOR).forEach((image) => addCandidateImage(candidates, image));
     }
+
     return Array.from(candidates);
   }
 
@@ -831,15 +1025,16 @@
   }
 
   function installGeminiDownloadHook() {
-    if (typeof window.fetch !== 'function') {
+    const pageWindow = getPageWindow();
+    if (!pageWindow || typeof pageWindow.fetch !== 'function') {
       return;
     }
 
     // Normalize Gemini asset URLs to full-size originals before unblending the watermark.
-    const originalFetch = window.fetch.bind(window);
+    const originalFetch = pageWindow.fetch.bind(pageWindow);
     const cache = new Map();
 
-    window.fetch = async (...args) => {
+    pageWindow.fetch = async (...args) => {
       if (shouldBypassHook(args)) {
         return originalFetch(...args);
       }
@@ -851,8 +1046,16 @@
       }
 
       const normalizedUrl = normalizeGoogleusercontentImageUrl(url);
+      emitRuntimeDebugEvent('fetch-hook-hit', {
+        url,
+        normalizedUrl
+      });
       const response = await originalFetch(...buildHookRequestArgs(args, normalizedUrl));
       if (!response || !response.ok) {
+        emitRuntimeDebugEvent('fetch-hook-response-skip', {
+          normalizedUrl,
+          status: response && typeof response.status === 'number' ? response.status : 0
+        });
         return response;
       }
 
@@ -860,6 +1063,10 @@
         ? response.headers.get('content-type') || ''
         : '';
       if (!contentType.startsWith('image/')) {
+        emitRuntimeDebugEvent('fetch-hook-non-image', {
+          normalizedUrl,
+          contentType
+        });
         return response;
       }
 
@@ -879,25 +1086,118 @@
         }
 
         const processedBlob = await pendingBlob;
+        emitRuntimeDebugEvent('fetch-hook-processed', {
+          normalizedUrl,
+          size: processedBlob.size || 0,
+          type: processedBlob.type || ''
+        });
         return buildProcessedResponse(response, processedBlob);
       } catch {
+        emitRuntimeDebugEvent('fetch-hook-failed', {
+          normalizedUrl
+        });
         return fallbackResponse;
       }
     };
   }
 
+  function requestBlobWithUserscriptApi(url) {
+    const request = getUserscriptRequestApi();
+    if (!request) {
+      return Promise.reject(new Error('Userscript request API unavailable'));
+    }
+
+    return new Promise((resolve, reject) => {
+      request({
+        method: 'GET',
+        url,
+        responseType: 'blob',
+        onload(response) {
+          if (!response || (response.status && (response.status < 200 || response.status >= 300))) {
+            reject(new Error('Failed to fetch image: ' + (response ? response.status : 0)));
+            return;
+          }
+
+          const blob = response.response;
+          if (blob && typeof blob.arrayBuffer === 'function') {
+            resolve(blob);
+            return;
+          }
+
+          reject(new Error('Userscript request did not return a blob'));
+        },
+        onerror(response) {
+          reject(new Error((response && response.error) || 'Userscript request failed'));
+        },
+        ontimeout() {
+          reject(new Error('Userscript request timed out'));
+        }
+      });
+    });
+  }
+
   async function fetchBlobWithBypass(url) {
-    const response = await window.fetch(url, {
+    const userscriptRequest = getUserscriptRequestApi();
+    if (userscriptRequest) {
+      return requestBlobWithUserscriptApi(url);
+    }
+
+    const pageWindow = getPageWindow();
+    if (!pageWindow || typeof pageWindow.fetch !== 'function') {
+      throw new Error('No fetch API available');
+    }
+
+    const response = await pageWindow.fetch(url, {
       gwuBypass: true,
       headers: { 'x-gwu-bypass': '1' }
     });
     if (!response.ok) {
       throw new Error('Failed to fetch image: ' + response.status);
     }
+
     return response.blob();
   }
 
+  async function waitForRenderableImage(imageElement, timeoutMs) {
+    const size = getMediaEdgeSize(imageElement);
+    if (size.width > 0 && size.height > 0) {
+      return;
+    }
+
+    await new Promise((resolve) => {
+      let settled = false;
+
+      function finish() {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve();
+      }
+
+      function cleanup() {
+        if (typeof imageElement.removeEventListener === 'function') {
+          imageElement.removeEventListener('load', finish);
+          imageElement.removeEventListener('error', finish);
+        }
+      }
+
+      if (typeof imageElement.addEventListener === 'function') {
+        imageElement.addEventListener('load', finish, { once: true });
+        imageElement.addEventListener('error', finish, { once: true });
+      }
+
+      if (typeof imageElement.decode === 'function') {
+        imageElement.decode().catch(() => {}).finally(finish);
+      }
+
+      setTimeout(finish, timeoutMs || 1500);
+    });
+  }
+
   async function captureRenderedImageBlob(imageElement) {
+    await waitForRenderableImage(imageElement, 1500);
     const width = Math.max(imageElement.naturalWidth || imageElement.width || 0, imageElement.clientWidth || 0);
     const height = Math.max(imageElement.naturalHeight || imageElement.height || 0, imageElement.clientHeight || 0);
     if (!width || !height) {
@@ -916,11 +1216,27 @@
   }
 
   async function fetchSourceBlobForImage(imageElement, sourceUrl) {
+    if (!sourceUrl || !isGeminiGeneratedAssetUrl(sourceUrl)) {
+      return {
+        blob: await captureRenderedImageBlob(imageElement),
+        mode: 'rendered'
+      };
+    }
+
     const normalizedUrl = normalizeGoogleusercontentImageUrl(sourceUrl);
     try {
-      return await fetchBlobWithBypass(normalizedUrl);
-    } catch {
-      return captureRenderedImageBlob(imageElement);
+      return {
+        blob: await fetchBlobWithBypass(normalizedUrl),
+        mode: 'fetch',
+        normalizedUrl
+      };
+    } catch (error) {
+      return {
+        blob: await captureRenderedImageBlob(imageElement),
+        mode: 'rendered-fallback',
+        normalizedUrl,
+        error
+      };
     }
   }
 
@@ -977,11 +1293,199 @@
 
   function installPageImageReplacement() {
     const processing = new WeakSet();
-    let observer = null;
+    const observedRoots = new WeakSet();
+    const activeObservers = [];
+    const imageIds = new WeakMap();
+    let nextImageId = 1;
+
+    function truncateDebugValue(value, maxLength) {
+      const text = String(value || '');
+      if (text.length <= maxLength) {
+        return text;
+      }
+      return text.slice(0, maxLength - 1) + '…';
+    }
+
+    function serializeDebugError(error) {
+      if (!error) {
+        return '';
+      }
+
+      if (typeof error === 'string') {
+        return truncateDebugValue(error, 180);
+      }
+
+      if (error && typeof error.message === 'string' && error.message.trim()) {
+        return truncateDebugValue(error.message.trim(), 180);
+      }
+
+      return truncateDebugValue(String(error), 180);
+    }
+
+    function getDebugImageId(imageElement) {
+      if (!imageElement) {
+        return 0;
+      }
+
+      const existingId = imageIds.get(imageElement);
+      if (existingId) {
+        return existingId;
+      }
+
+      const assignedId = nextImageId;
+      nextImageId += 1;
+      imageIds.set(imageElement, assignedId);
+      if (imageElement.dataset) {
+        imageElement.dataset[DEBUG_IMAGE_ID_KEY] = String(assignedId);
+      }
+      return assignedId;
+    }
+
+    function setImageDebugMetadata(imageElement, debugInfo) {
+      if (!imageElement || !imageElement.dataset || !debugInfo) {
+        return;
+      }
+
+      if (debugInfo.reason) {
+        imageElement.dataset[DEBUG_REASON_KEY] = truncateDebugValue(debugInfo.reason, 80);
+      }
+      if (debugInfo.mode) {
+        imageElement.dataset[DEBUG_MODE_KEY] = truncateDebugValue(debugInfo.mode, 80);
+      } else {
+        delete imageElement.dataset[DEBUG_MODE_KEY];
+      }
+      if (debugInfo.error) {
+        imageElement.dataset[DEBUG_ERROR_KEY] = truncateDebugValue(debugInfo.error, 160);
+      } else {
+        delete imageElement.dataset[DEBUG_ERROR_KEY];
+      }
+    }
+
+    function getRootKind(root) {
+      if (root instanceof ShadowRoot) {
+        return 'shadow';
+      }
+      if (root === document || root === document.documentElement || root === document.body) {
+        return 'document';
+      }
+      if (root && typeof root.nodeName === 'string') {
+        return root.nodeName.toLowerCase();
+      }
+      return typeof root;
+    }
+
+    function inspectImage(imageElement) {
+      const candidate = describeGeminiImageCandidate(imageElement);
+      const size = candidate.size || { width: 0, height: 0 };
+      const rootNode = typeof imageElement.getRootNode === 'function' ? imageElement.getRootNode() : null;
+      const dataset = imageElement.dataset || {};
+
+      return {
+        id: getDebugImageId(imageElement),
+        state: dataset[IMAGE_STATE_KEY] || '',
+        reason: dataset[DEBUG_REASON_KEY] || candidate.reason,
+        mode: dataset[DEBUG_MODE_KEY] || '',
+        error: dataset[DEBUG_ERROR_KEY] || '',
+        sourceKey: candidate.sourceKey,
+        sourceUrl: candidate.sourceUrl,
+        currentSrc: candidate.currentSrc,
+        src: candidate.src,
+        stableSource: candidate.stableSource,
+        explicitSource: candidate.explicitSource,
+        processable: candidate.processable,
+        isGeminiAsset: candidate.isGeminiAsset,
+        inGeminiContainer: candidate.inGeminiContainer,
+        meaningfulSize: candidate.meaningfulSize,
+        hasActionCluster: candidate.hasActionCluster,
+        usesRenderedFallback: candidate.usesRenderedFallback,
+        width: size.width,
+        height: size.height,
+        inShadowRoot: rootNode instanceof ShadowRoot
+      };
+    }
+
+    function recordDebugEvent(type, details) {
+      const entry = Object.assign(
+        {
+          time: new Date().toISOString(),
+          type
+        },
+        details || {}
+      );
+      debugApi.events.push(entry);
+      if (debugApi.events.length > DEBUG_EVENT_LIMIT) {
+        debugApi.events.splice(0, debugApi.events.length - DEBUG_EVENT_LIMIT);
+      }
+    }
+
+    function inspectImages(root) {
+      return collectImagesInTree(root || document).map((image) => inspectImage(image));
+    }
+
+    const debugApi = {
+      version: '0.2.4',
+      events: [],
+      clear() {
+        this.events.length = 0;
+      },
+      getEvents() {
+        return this.events.slice();
+      },
+      inspectImages(root) {
+        return inspectImages(root);
+      },
+      summary() {
+        const images = inspectImages(document);
+        const counts = {
+          totalImages: images.length,
+          processableImages: images.filter((image) => image.processable).length,
+          readyImages: images.filter((image) => image.state === 'ready').length,
+          failedImages: images.filter((image) => image.state === 'failed').length,
+          skippedImages: images.filter((image) => image.state === 'skipped').length,
+          processingImages: images.filter((image) => image.state === 'processing').length,
+          shadowImages: images.filter((image) => image.inShadowRoot).length
+        };
+
+        return {
+          version: this.version,
+          observers: activeObservers.length,
+          counts,
+          images,
+          recentEvents: this.events.slice(-25)
+        };
+      },
+      dump() {
+        return JSON.stringify(this.summary(), null, 2);
+      },
+      copy() {
+        const dump = this.dump();
+        if (typeof window.copy === 'function') {
+          window.copy(dump);
+        }
+        return dump;
+      },
+      scan() {
+        batchProcessor.schedule(document);
+        return this.summary();
+      }
+    };
+
+    runtimeDebug = {
+      record: recordDebugEvent
+    };
+    window.__gwuDebug = debugApi;
+    recordDebugEvent('debug-installed', {
+      readyState: document.readyState
+    });
 
     function processRoot(root) {
       // Swap matching Gemini images in-place once the processed blob is ready.
-      for (const imageElement of collectCandidateImages(root || document)) {
+      const candidates = collectCandidateImages(root || document);
+      recordDebugEvent('root-scan', {
+        root: getRootKind(root || document),
+        candidateCount: candidates.length
+      });
+      for (const imageElement of candidates) {
         void processImage(imageElement);
       }
     }
@@ -989,48 +1493,128 @@
     const batchProcessor = createRootBatchProcessor(processRoot);
 
     async function processImage(imageElement) {
-      if (!isProcessableGeminiImageElement(imageElement)) {
+      const candidate = describeGeminiImageCandidate(imageElement);
+      const imageId = getDebugImageId(imageElement);
+      setImageDebugMetadata(imageElement, {
+        reason: candidate.reason
+      });
+
+      if (!candidate.processable) {
+        recordDebugEvent('image-skip-unprocessable', {
+          imageId,
+          reason: candidate.reason
+        });
         return;
       }
 
-      const sourceUrl = resolveCandidateImageUrl(imageElement);
-      if (!sourceUrl || processing.has(imageElement)) {
+      const sourceKey = candidate.sourceKey;
+      const sourceUrl = candidate.sourceUrl;
+      if (!sourceKey || processing.has(imageElement)) {
+        recordDebugEvent('image-skip-processing-lock', {
+          imageId,
+          reason: !sourceKey ? 'missing-source-key' : 'already-processing'
+        });
         return;
       }
 
-      if (
-        imageElement.dataset &&
-        imageElement.dataset[IMAGE_SOURCE_KEY] === sourceUrl &&
-        imageElement.dataset[IMAGE_STATE_KEY] === 'ready'
-      ) {
+      if (hasProcessedImageApplied(imageElement, sourceKey)) {
+        setImageDebugMetadata(imageElement, {
+          reason: 'already-applied'
+        });
+        recordDebugEvent('image-skip-ready', {
+          imageId,
+          sourceKey
+        });
         return;
       }
 
       processing.add(imageElement);
-      markImageState(imageElement, sourceUrl, 'processing');
+      markImageState(imageElement, sourceKey, 'processing');
+      setImageDebugMetadata(imageElement, {
+        reason: candidate.reason
+      });
+      recordDebugEvent('image-processing-start', {
+        imageId,
+        reason: candidate.reason,
+        sourceKey,
+        sourceUrl
+      });
 
       try {
-        const sourceBlob = await fetchSourceBlobForImage(imageElement, sourceUrl);
-        const result = await processWatermarkBlob(sourceBlob);
+        const sourceResult = await fetchSourceBlobForImage(imageElement, sourceUrl);
+        setImageDebugMetadata(imageElement, {
+          reason: candidate.reason,
+          mode: sourceResult.mode,
+          error: serializeDebugError(sourceResult.error)
+        });
+        recordDebugEvent('image-source-ready', {
+          imageId,
+          mode: sourceResult.mode,
+          normalizedUrl: sourceResult.normalizedUrl || '',
+          error: serializeDebugError(sourceResult.error)
+        });
+        const result = await processWatermarkBlob(sourceResult.blob);
         if (!result.processedMeta || result.processedMeta.applied !== true) {
-          markImageState(imageElement, sourceUrl, 'skipped');
+          markImageState(imageElement, sourceKey, 'skipped');
+          setImageDebugMetadata(imageElement, {
+            reason: 'no-watermark-detected',
+            mode: sourceResult.mode
+          });
+          recordDebugEvent('image-processed-skipped', {
+            imageId,
+            mode: sourceResult.mode,
+            detectionScore: result.processedMeta && typeof result.processedMeta.detectionScore === 'number'
+              ? Number(result.processedMeta.detectionScore.toFixed(4))
+              : null
+          });
           return;
         }
-        applyProcessedImage(imageElement, sourceUrl, result.processedBlob);
-      } catch {
-        markImageState(imageElement, sourceUrl, 'failed');
+        applyProcessedImage(imageElement, sourceKey, result.processedBlob);
+        setImageDebugMetadata(imageElement, {
+          reason: 'watermark-removed',
+          mode: sourceResult.mode
+        });
+        recordDebugEvent('image-processed-ready', {
+          imageId,
+          mode: sourceResult.mode,
+          size: result.processedMeta.size,
+          detectionScore: Number(result.processedMeta.detectionScore.toFixed(4))
+        });
+      } catch (error) {
+        markImageState(imageElement, sourceKey, 'failed');
+        setImageDebugMetadata(imageElement, {
+          reason: 'processing-failed',
+          error: serializeDebugError(error)
+        });
+        recordDebugEvent('image-processed-failed', {
+          imageId,
+          error: serializeDebugError(error)
+        });
       } finally {
         processing.delete(imageElement);
       }
     }
 
-    function observe() {
-      const root = document.body || document.documentElement;
-      if (!root || observer) {
+    function scheduleShadowRootsWithin(root) {
+      if (!root || typeof root.querySelectorAll !== 'function') {
         return;
       }
 
-      observer = new MutationObserver((mutations) => {
+      root.querySelectorAll('*').forEach((element) => {
+        if (element && element.shadowRoot) {
+          observeRoot(element.shadowRoot);
+          batchProcessor.schedule(element.shadowRoot);
+        }
+      });
+    }
+
+    function observeRoot(root) {
+      if (!root || observedRoots.has(root)) {
+        return;
+      }
+
+      observedRoots.add(root);
+      const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
           if (mutation.type === 'attributes') {
             if (mutation.target instanceof HTMLImageElement && OBSERVED_IMAGE_ATTRIBUTES.includes(mutation.attributeName || '')) {
@@ -1041,8 +1625,15 @@
 
           if (mutation.type === 'childList') {
             for (const node of mutation.addedNodes) {
-              if (node instanceof Element || node instanceof HTMLImageElement) {
+              if (node instanceof Element || node instanceof HTMLImageElement || node instanceof ShadowRoot) {
                 batchProcessor.schedule(node);
+                if (node instanceof Element && node.shadowRoot) {
+                  observeRoot(node.shadowRoot);
+                  batchProcessor.schedule(node.shadowRoot);
+                }
+                if (node instanceof Element || node instanceof ShadowRoot) {
+                  scheduleShadowRootsWithin(node);
+                }
               }
             }
           }
@@ -1055,6 +1646,44 @@
         attributes: true,
         attributeFilter: OBSERVED_IMAGE_ATTRIBUTES
       });
+      activeObservers.push(observer);
+      recordDebugEvent('observe-root', {
+        root: getRootKind(root)
+      });
+      scheduleShadowRootsWithin(root);
+    }
+
+    function observe() {
+      const root = document.body || document.documentElement;
+      if (!root) {
+        return;
+      }
+
+      observeRoot(root);
+      recordDebugEvent('observe-start', {
+        root: getRootKind(root)
+      });
+
+      if (typeof Element !== 'undefined' && !Element.prototype.gwuAttachShadowWrapped) {
+        const originalAttachShadow = Element.prototype.attachShadow;
+        if (typeof originalAttachShadow === 'function') {
+          Object.defineProperty(Element.prototype, 'gwuAttachShadowWrapped', {
+            value: true,
+            configurable: true
+          });
+          Element.prototype.attachShadow = function patchedAttachShadow(init) {
+            const shadowRoot = originalAttachShadow.call(this, init);
+            observeRoot(shadowRoot);
+            batchProcessor.schedule(shadowRoot);
+            recordDebugEvent('attach-shadow', {
+              root: getRootKind(shadowRoot)
+            });
+            return shadowRoot;
+          };
+        }
+      }
+
+      batchProcessor.schedule(root);
     }
 
     if (document.readyState === 'loading') {
@@ -1079,10 +1708,12 @@
     classifyGeminiAssetUrl,
     isGeminiGeneratedAssetUrl,
     normalizeGoogleusercontentImageUrl,
+    resolveCandidateImageUrl,
     detectWatermarkConfig,
     calculateWatermarkPosition,
     getEmbeddedAlphaMap,
-    processWatermarkImageData
+    processWatermarkImageData,
+    hasProcessedImageApplied
   };
 
   if (typeof module !== 'undefined' && module.exports) {

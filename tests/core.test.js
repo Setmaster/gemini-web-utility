@@ -6,10 +6,12 @@ const {
   classifyGeminiAssetPath,
   classifyGeminiAssetUrl,
   normalizeGoogleusercontentImageUrl,
+  resolveCandidateImageUrl,
   detectWatermarkConfig,
   calculateWatermarkPosition,
   getEmbeddedAlphaMap,
-  processWatermarkImageData
+  processWatermarkImageData,
+  hasProcessedImageApplied
 } = require('../gemini-web-utility.user.js');
 
 function createSyntheticImageData(width, height) {
@@ -134,6 +136,67 @@ test('normalizes Gemini asset URLs to original-size fetches', () => {
   assert.equal(
     normalizeGoogleusercontentImageUrl('https://example.com/not-gemini.png'),
     'https://example.com/not-gemini.png'
+  );
+});
+
+test('resolves explicit and stable candidate image URLs', () => {
+  assert.equal(
+    resolveCandidateImageUrl({
+      dataset: {
+        gwuSourceUrl: 'https://lh3.googleusercontent.com/gg/explicit=s0'
+      },
+      currentSrc: 'blob:https://gemini.google.com/example',
+      src: 'blob:https://gemini.google.com/example'
+    }),
+    'https://lh3.googleusercontent.com/gg/explicit=s0'
+  );
+
+  assert.equal(
+    resolveCandidateImageUrl({
+      dataset: {
+        gwuStableSource: 'https://lh3.googleusercontent.com/gg/stable=s0'
+      },
+      currentSrc: 'blob:https://gemini.google.com/example',
+      src: 'blob:https://gemini.google.com/example'
+    }),
+    'https://lh3.googleusercontent.com/gg/stable=s0'
+  );
+});
+
+test('treats a processed image as applied only while the blob URL is still active', () => {
+  const sourceUrl = 'https://lh3.googleusercontent.com/gg/foo=s0';
+  const blobUrl = 'blob:https://gemini.google.com/example';
+
+  assert.equal(
+    hasProcessedImageApplied(
+      {
+        src: blobUrl,
+        currentSrc: blobUrl,
+        dataset: {
+          gwuImageSource: sourceUrl,
+          gwuImageState: 'ready',
+          gwuObjectUrl: blobUrl
+        }
+      },
+      sourceUrl
+    ),
+    true
+  );
+
+  assert.equal(
+    hasProcessedImageApplied(
+      {
+        src: sourceUrl,
+        currentSrc: sourceUrl,
+        dataset: {
+          gwuImageSource: sourceUrl,
+          gwuImageState: 'ready',
+          gwuObjectUrl: blobUrl
+        }
+      },
+      sourceUrl
+    ),
+    false
   );
 });
 
