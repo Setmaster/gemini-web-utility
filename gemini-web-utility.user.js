@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.2.4
+// @version      0.3.0
 // @description  Utilities for the Gemini web app: clean copy and NanoBanana watermark removal.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -20,6 +20,18 @@
     '[data-test-id="model-response-message-content"]'
   ].join(', ');
   const HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6, [role="heading"]';
+  const ELEMENT_NODE = 1;
+  const TEXT_NODE = 3;
+  const DOCUMENT_FRAGMENT_NODE = 11;
+  const COPY_ACTION_SELECTOR = [
+    'copy-button',
+    '[data-test-id*="copy"]',
+    'button[aria-label*="Copy"]',
+    'button[title*="Copy"]'
+  ].join(', ');
+  const COPY_MARKDOWN_BUTTON_CLASS = 'gwu-copy-markdown-button';
+  const COPY_MARKDOWN_BUTTON_ATTRIBUTE = 'data-gwu-copy-markdown';
+  const COPY_MARKDOWN_STYLE_ID = 'gwu-copy-markdown-style';
 
   const GEMINI_IMAGE_CONTAINER_SELECTOR = 'generated-image, .generated-image-container';
   const GEMINI_IMAGE_QUERY_SELECTOR = GEMINI_IMAGE_CONTAINER_SELECTOR
@@ -131,13 +143,17 @@
     return null;
   }
 
-  function buildSanitizedSelectionHtml(range, label) {
-    if (!range || !label || typeof document === 'undefined') {
+  function cloneSanitizedRangeContents(range, label) {
+    if (!range || typeof document === 'undefined') {
       return null;
     }
 
     const wrapper = document.createElement('div');
     wrapper.append(range.cloneContents());
+
+    if (!label) {
+      return wrapper;
+    }
 
     const headings = wrapper.querySelectorAll(HEADING_SELECTOR);
     for (const heading of headings) {
@@ -150,8 +166,408 @@
       }
     }
 
+    return wrapper;
+  }
+
+  function getChildNodes(node) {
+    if (!node || !node.childNodes) {
+      return [];
+    }
+
+    return Array.from(node.childNodes);
+  }
+
+  function getNodeType(node) {
+    return node && typeof node.nodeType === 'number' ? node.nodeType : 0;
+  }
+
+  function getNodeTagName(node) {
+    return node && typeof node.tagName === 'string' ? node.tagName.toLowerCase() : '';
+  }
+
+  function getNodeText(node) {
+    return node && typeof node.textContent === 'string' ? node.textContent : '';
+  }
+
+  function getNodeAttribute(node, name) {
+    if (!node || !name) {
+      return '';
+    }
+
+    if (typeof node.getAttribute === 'function') {
+      return node.getAttribute(name) || '';
+    }
+
+    if (node.attributes && typeof node.attributes[name] === 'string') {
+      return node.attributes[name];
+    }
+
+    if (typeof node[name] === 'string') {
+      return node[name];
+    }
+
+    return '';
+  }
+
+  function isWhitespaceOnlyTextNode(node) {
+    return getNodeType(node) === TEXT_NODE && getNodeText(node).trim() === '';
+  }
+
+  function isMarkdownBlockTag(tagName) {
+    return [
+      'article',
+      'blockquote',
+      'div',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'hr',
+      'ol',
+      'p',
+      'pre',
+      'section',
+      'table',
+      'ul'
+    ].includes(tagName);
+  }
+
+  function getRenderableChildNodes(node, preserveWhitespaceText) {
+    return getChildNodes(node).filter((child) => preserveWhitespaceText || !isWhitespaceOnlyTextNode(child));
+  }
+
+  function escapeMarkdownText(text) {
+    return String(text || '').replace(/([\\`*_{}\[\]()#+>|])/g, '\\$1');
+  }
+
+  function normalizeInlineMarkdown(text) {
+    return String(text || '')
+      .replace(/\s+/g, ' ')
+      .replace(/\s+([,.;:!?])/g, '$1')
+      .trim();
+  }
+
+  function normalizeMarkdownOutput(text) {
+    return String(text || '')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function indentMarkdownBlock(text, prefix) {
+    return String(text || '')
+      .split('\n')
+      .map((line) => (line ? prefix + line : prefix.trimEnd()))
+      .join('\n');
+  }
+
+  function wrapInlineMarkdown(marker, content) {
+    const normalized = normalizeInlineMarkdown(content);
+    return normalized ? marker + normalized + marker : '';
+  }
+
+  function extractCodeLanguage(node) {
+    const dataLanguage = getNodeAttribute(node, 'data-language').trim();
+    if (dataLanguage) {
+      return dataLanguage;
+    }
+
+    const className = getNodeAttribute(node, 'class').trim();
+    const match = className.match(/language-([A-Za-z0-9_+-]+)/);
+    return match ? match[1] : '';
+  }
+
+  function renderMarkdownTable(node) {
+    const rowNodes = [];
+
+    function visit(current) {
+      if (!current) {
+        return;
+      }
+
+      const tagName = getNodeTagName(current);
+      if (tagName === 'tr') {
+        rowNodes.push(current);
+        return;
+      }
+
+      for (const child of getChildNodes(current)) {
+        visit(child);
+      }
+    }
+
+    visit(node);
+    if (rowNodes.length === 0) {
+      return '';
+    }
+
+    const rows = rowNodes.map((row) =>
+      getChildNodes(row)
+        .filter((child) => {
+          const tagName = getNodeTagName(child);
+          return tagName === 'th' || tagName === 'td';
+        })
+        .map((cell) => normalizeInlineMarkdown(renderMarkdownNode(cell, {})).replace(/\|/g, '\\|'))
+    );
+
+    if (rows.length === 0 || rows[0].length === 0) {
+      return '';
+    }
+
+    const columnCount = rows.reduce((max, row) => Math.max(max, row.length), rows[0].length);
+    const paddedRows = rows.map((row) => {
+      const nextRow = row.slice();
+      while (nextRow.length < columnCount) {
+        nextRow.push('');
+      }
+      return nextRow;
+    });
+
+    const header = paddedRows[0];
+    const separator = new Array(columnCount).fill('---');
+    const lines = [
+      '| ' + header.join(' | ') + ' |',
+      '| ' + separator.join(' | ') + ' |'
+    ];
+
+    for (let index = 1; index < paddedRows.length; index += 1) {
+      lines.push('| ' + paddedRows[index].join(' | ') + ' |');
+    }
+
+    return lines.join('\n') + '\n\n';
+  }
+
+  function renderMarkdownList(node, context) {
+    const ordered = getNodeTagName(node) === 'ol';
+    const listDepth = Number(context && context.listDepth) || 0;
+    const indent = '  '.repeat(listDepth);
+    const items = getChildNodes(node).filter((child) => getNodeTagName(child) === 'li');
+    let out = '';
+
+    items.forEach((item, index) => {
+      const prefix = ordered ? String(index + 1) + '. ' : '- ';
+      const inlineParts = [];
+      const nestedParts = [];
+
+      for (const child of getChildNodes(item)) {
+        const tagName = getNodeTagName(child);
+        if (tagName === 'ul' || tagName === 'ol') {
+          nestedParts.push(renderMarkdownList(child, { listDepth: listDepth + 1 }));
+          continue;
+        }
+        inlineParts.push(renderMarkdownNode(child, Object.assign({}, context, { listDepth })));
+      }
+
+      const line = normalizeInlineMarkdown(inlineParts.join(''));
+      out += indent + prefix + line + '\n';
+      if (nestedParts.length > 0) {
+        out += nestedParts.join('');
+      }
+    });
+
+    return out + '\n';
+  }
+
+  function renderMarkdownNode(node, context) {
+    const nodeType = getNodeType(node);
+    if (nodeType === TEXT_NODE) {
+      if (context && context.preformatted) {
+        return getNodeText(node);
+      }
+      return escapeMarkdownText(getNodeText(node).replace(/\s+/g, ' '));
+    }
+
+    if (nodeType !== ELEMENT_NODE && nodeType !== DOCUMENT_FRAGMENT_NODE) {
+      return '';
+    }
+
+    if (nodeType === DOCUMENT_FRAGMENT_NODE) {
+      return getRenderableChildNodes(node, false)
+        .map((child) => renderMarkdownNode(child, context))
+        .join('');
+    }
+
+    const tagName = getNodeTagName(node);
+    const childNodes = getRenderableChildNodes(node, !isMarkdownBlockTag(tagName));
+    const childMarkdown = () =>
+      childNodes
+        .map((child) => renderMarkdownNode(child, context))
+        .join('');
+
+    if (!tagName) {
+      return childMarkdown();
+    }
+
+    if (tagName === 'br') {
+      return '\n';
+    }
+
+    if (tagName === 'strong' || tagName === 'b') {
+      return wrapInlineMarkdown('**', childMarkdown());
+    }
+
+    if (tagName === 'em' || tagName === 'i') {
+      return wrapInlineMarkdown('*', childMarkdown());
+    }
+
+    if (tagName === 'code') {
+      if (context && context.preformatted) {
+        return getNodeText(node);
+      }
+      const codeText = getNodeText(node).replace(/\s+/g, ' ').trim();
+      return codeText ? '`' + codeText.replace(/`/g, '\\`') + '`' : '';
+    }
+
+    if (tagName === 'a') {
+      const text = normalizeInlineMarkdown(childMarkdown()) || getNodeAttribute(node, 'href').trim();
+      const href = getNodeAttribute(node, 'href').trim();
+      return href ? '[' + text + '](' + href + ')' : text;
+    }
+
+    if (tagName === 'img') {
+      const alt = getNodeAttribute(node, 'alt').trim();
+      const src = getNodeAttribute(node, 'src').trim();
+      if (!src) {
+        return alt;
+      }
+      return '![' + alt + '](' + src + ')';
+    }
+
+    if (tagName === 'pre') {
+      const firstChild = getChildNodes(node)[0];
+      const language = extractCodeLanguage(firstChild || node);
+      const codeText = getNodeText(firstChild || node).replace(/\n+$/, '');
+      return '```' + language + '\n' + codeText + '\n```\n\n';
+    }
+
+    if (tagName === 'blockquote') {
+      const block = normalizeMarkdownOutput(childMarkdown());
+      if (!block) {
+        return '';
+      }
+      return indentMarkdownBlock(block, '> ') + '\n\n';
+    }
+
+    if (tagName === 'ul' || tagName === 'ol') {
+      return renderMarkdownList(node, context || {});
+    }
+
+    if (tagName === 'table') {
+      return renderMarkdownTable(node);
+    }
+
+    if (tagName === 'hr') {
+      return '---\n\n';
+    }
+
+    if (/^h[1-6]$/.test(tagName)) {
+      const level = Number(tagName.slice(1)) || 1;
+      const heading = normalizeInlineMarkdown(childMarkdown());
+      return '#'.repeat(level) + ' ' + heading + '\n\n';
+    }
+
+    if (tagName === 'p') {
+      const paragraph = normalizeInlineMarkdown(childMarkdown());
+      return paragraph ? paragraph + '\n\n' : '';
+    }
+
+    if (tagName === 'div' || tagName === 'section' || tagName === 'article') {
+      const block = normalizeMarkdownOutput(childMarkdown());
+      return block ? block + '\n\n' : '';
+    }
+
+    if (tagName === 'thead' || tagName === 'tbody' || tagName === 'tfoot' || tagName === 'tr' || tagName === 'th' || tagName === 'td') {
+      return childMarkdown();
+    }
+
+    return childMarkdown();
+  }
+
+  function convertHtmlTreeToMarkdown(root) {
+    return normalizeMarkdownOutput(renderMarkdownNode(root, {}));
+  }
+
+  function buildSanitizedSelectionHtml(range, label) {
+    const wrapper = cloneSanitizedRangeContents(range, label);
+    if (!wrapper) {
+      return null;
+    }
+
     const html = wrapper.innerHTML.trim();
     return html || null;
+  }
+
+  function buildSanitizedSelectionMarkdown(range, label) {
+    const wrapper = cloneSanitizedRangeContents(range, label);
+    if (!wrapper) {
+      return '';
+    }
+
+    return convertHtmlTreeToMarkdown(wrapper);
+  }
+
+  function getResponseContentRoot(responseContainer) {
+    if (!responseContainer) {
+      return null;
+    }
+
+    return responseContainer.querySelector(CONTENT_ROOT_SELECTOR) || responseContainer;
+  }
+
+  function buildResponseMarkdown(responseContainer) {
+    const contentRoot = getResponseContentRoot(responseContainer);
+    if (!contentRoot) {
+      return '';
+    }
+
+    const wrapper = contentRoot.cloneNode(true);
+    return convertHtmlTreeToMarkdown(wrapper);
+  }
+
+  function buildResponseCopyPayload(responseContainer, options) {
+    const contentRoot = getResponseContentRoot(responseContainer);
+    if (!contentRoot) {
+      return null;
+    }
+
+    const markdown = buildResponseMarkdown(responseContainer);
+    const cleanText = normalizeMarkdownOutput(getNodeText(contentRoot));
+    const preferMarkdownPlainText = Boolean(options && options.preferMarkdownPlainText);
+
+    return {
+      text: preferMarkdownPlainText ? markdown || cleanText : cleanText,
+      markdown,
+      html: contentRoot.innerHTML.trim() || null
+    };
+  }
+
+  async function writeClipboardPayload(payload) {
+    if (!payload || !payload.text) {
+      return false;
+    }
+
+    if (navigator.clipboard && typeof navigator.clipboard.write === 'function' && typeof ClipboardItem !== 'undefined') {
+      const itemData = {
+        'text/plain': new Blob([payload.text], { type: 'text/plain' })
+      };
+      if (payload.markdown) {
+        itemData['text/markdown'] = new Blob([payload.markdown], { type: 'text/markdown' });
+      }
+      if (payload.html) {
+        itemData['text/html'] = new Blob([payload.html], { type: 'text/html' });
+      }
+      await navigator.clipboard.write([new ClipboardItem(itemData)]);
+      return true;
+    }
+
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(payload.markdown || payload.text);
+      return true;
+    }
+
+    return false;
   }
 
   function handleCopy(event) {
@@ -170,28 +586,145 @@
     }
 
     const label = getResponseLabel(responseContainer);
-    if (!label) {
-      return;
-    }
-
     const selectedText = selection.toString();
     if (!selectedText) {
       return;
     }
 
-    const sanitizedText = sanitizeLeadingResponseLabel(selectedText, label);
-    if (sanitizedText === selectedText) {
-      return;
-    }
-
+    const sanitizedText = sanitizeLeadingResponseLabel(selectedText, label || '').trim();
     const html = buildSanitizedSelectionHtml(selection.getRangeAt(0), label);
+    const markdown = buildSanitizedSelectionMarkdown(selection.getRangeAt(0), label);
+
     event.preventDefault();
     event.stopImmediatePropagation();
-    event.clipboardData.setData('text/plain', sanitizedText);
+    event.clipboardData.setData('text/plain', sanitizedText || selectedText);
+
+    if (markdown) {
+      event.clipboardData.setData('text/markdown', markdown);
+    }
 
     if (html) {
       event.clipboardData.setData('text/html', html);
     }
+  }
+
+  function ensureCopyMarkdownStyles() {
+    if (typeof document === 'undefined' || document.getElementById(COPY_MARKDOWN_STYLE_ID)) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = COPY_MARKDOWN_STYLE_ID;
+    style.textContent = [
+      '.' + COPY_MARKDOWN_BUTTON_CLASS + ' {',
+      '  border: 1px solid rgba(60, 64, 67, 0.16);',
+      '  background: transparent;',
+      '  border-radius: 999px;',
+      '  padding: 0.35rem 0.7rem;',
+      '  font: inherit;',
+      '  cursor: pointer;',
+      '}',
+      '.' + COPY_MARKDOWN_BUTTON_CLASS + ':hover {',
+      '  background: rgba(60, 64, 67, 0.08);',
+      '}'
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  function findResponseActionAnchor(responseContainer) {
+    if (!responseContainer || typeof responseContainer.querySelector !== 'function') {
+      return null;
+    }
+
+    return responseContainer.querySelector(COPY_ACTION_SELECTOR);
+  }
+
+  function installCopyMarkdownButtons() {
+    ensureCopyMarkdownStyles();
+
+    function attachButton(responseContainer) {
+      if (!responseContainer || responseContainer.querySelector('[' + COPY_MARKDOWN_BUTTON_ATTRIBUTE + ']')) {
+        return;
+      }
+
+      const anchor = findResponseActionAnchor(responseContainer);
+      if (!anchor) {
+        return;
+      }
+
+      const host = anchor.parentElement || responseContainer;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = COPY_MARKDOWN_BUTTON_CLASS;
+      button.setAttribute(COPY_MARKDOWN_BUTTON_ATTRIBUTE, 'true');
+      button.textContent = 'Copy Markdown';
+      button.addEventListener('click', async () => {
+        const payload = buildResponseCopyPayload(responseContainer, { preferMarkdownPlainText: true });
+        if (!payload) {
+          return;
+        }
+
+        const originalText = button.textContent;
+        try {
+          await writeClipboardPayload(payload);
+          button.textContent = 'Markdown Copied';
+        } catch {
+          button.textContent = 'Copy Failed';
+        }
+
+        window.setTimeout(() => {
+          button.textContent = originalText;
+        }, 1400);
+      });
+
+      if (anchor.nextSibling) {
+        host.insertBefore(button, anchor.nextSibling);
+      } else {
+        host.appendChild(button);
+      }
+    }
+
+    function processRoot(root) {
+      const scope = root && typeof root.querySelectorAll === 'function' ? root : document;
+      if (!scope || typeof scope.querySelectorAll !== 'function') {
+        return;
+      }
+
+      if (scope instanceof Element && scope.matches(RESPONSE_CONTAINER_SELECTOR)) {
+        attachButton(scope);
+      }
+
+      scope.querySelectorAll(RESPONSE_CONTAINER_SELECTOR).forEach((responseContainer) => {
+        attachButton(responseContainer);
+      });
+    }
+
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof Element) {
+            processRoot(node);
+          }
+        }
+      }
+    });
+
+    function observe() {
+      const root = document.body || document.documentElement;
+      if (!root) {
+        return;
+      }
+
+      processRoot(document);
+      observer.observe(root, { childList: true, subtree: true });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', observe, { once: true });
+      return;
+    }
+
+    observe();
   }
 
   function decodeBase64(base64) {
@@ -1704,6 +2237,8 @@
 
   const exported = {
     sanitizeLeadingResponseLabel,
+    convertHtmlTreeToMarkdown,
+    buildResponseMarkdown,
     classifyGeminiAssetPath,
     classifyGeminiAssetUrl,
     isGeminiGeneratedAssetUrl,
@@ -1725,6 +2260,7 @@
   }
 
   document.addEventListener('copy', handleCopy, true);
+  installCopyMarkdownButtons();
   installGeminiDownloadHook();
   installPageImageReplacement();
 })();

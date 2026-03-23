@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 
 const {
   sanitizeLeadingResponseLabel,
+  convertHtmlTreeToMarkdown,
+  buildResponseMarkdown,
   classifyGeminiAssetPath,
   classifyGeminiAssetUrl,
   normalizeGoogleusercontentImageUrl,
@@ -13,6 +15,63 @@ const {
   processWatermarkImageData,
   hasProcessedImageApplied
 } = require('../gemini-web-utility.user.js');
+
+function textNode(text) {
+  return {
+    nodeType: 3,
+    textContent: text
+  };
+}
+
+function elementNode(tagName, options, children) {
+  const config = options || {};
+  const childNodes = children || [];
+  const attributes = Object.assign({}, config.attributes);
+  const className = config.className || attributes.class || '';
+  const node = {
+    nodeType: 1,
+    tagName: tagName.toUpperCase(),
+    childNodes,
+    textContent: childNodes.map((child) => child.textContent || '').join(''),
+    innerHTML: config.innerHTML || '',
+    className,
+    attributes,
+    getAttribute(name) {
+      if (name === 'class') {
+        return className;
+      }
+      return attributes[name] || '';
+    },
+    cloneNode(deep) {
+      if (!deep) {
+        return elementNode(tagName, options, []);
+      }
+      return elementNode(
+        tagName,
+        options,
+        childNodes.map((child) => {
+          if (child.nodeType === 3) {
+            return textNode(child.textContent);
+          }
+          if (typeof child.cloneNode === 'function') {
+            return child.cloneNode(true);
+          }
+          return child;
+        })
+      );
+    }
+  };
+
+  return node;
+}
+
+function fragmentNode(children) {
+  return {
+    nodeType: 11,
+    childNodes: children,
+    textContent: children.map((child) => child.textContent || '').join('')
+  };
+}
 
 function createSyntheticImageData(width, height) {
   const imageData = {
@@ -137,6 +196,82 @@ test('normalizes Gemini asset URLs to original-size fetches', () => {
     normalizeGoogleusercontentImageUrl('https://example.com/not-gemini.png'),
     'https://example.com/not-gemini.png'
   );
+});
+
+test('converts common Gemini response markup to markdown', () => {
+  const tree = fragmentNode([
+    elementNode('h2', {}, [textNode('Title')]),
+    elementNode('p', {}, [
+      textNode('Hello '),
+      elementNode('strong', {}, [textNode('world')]),
+      textNode(' and '),
+      elementNode('a', { attributes: { href: 'https://example.com' } }, [textNode('links')]),
+      textNode('.')
+    ]),
+    elementNode('ul', {}, [
+      elementNode('li', {}, [textNode('first')]),
+      elementNode('li', {}, [textNode('second')])
+    ]),
+    elementNode('blockquote', {}, [
+      elementNode('p', {}, [textNode('quoted text')])
+    ]),
+    elementNode('pre', {}, [
+      elementNode('code', { className: 'language-js' }, [textNode("console.log('x');\n")])
+    ])
+  ]);
+
+  assert.equal(
+    convertHtmlTreeToMarkdown(tree),
+    [
+      '## Title',
+      '',
+      'Hello **world** and [links](https://example.com).',
+      '',
+      '- first',
+      '- second',
+      '',
+      '> quoted text',
+      '',
+      '```js',
+      "console.log('x');",
+      '```'
+    ].join('\n')
+  );
+});
+
+test('renders simple tables as markdown tables', () => {
+  const table = elementNode('table', {}, [
+    elementNode('tr', {}, [
+      elementNode('th', {}, [textNode('Name')]),
+      elementNode('th', {}, [textNode('Value')])
+    ]),
+    elementNode('tr', {}, [
+      elementNode('td', {}, [textNode('Alpha')]),
+      elementNode('td', {}, [textNode('42')])
+    ])
+  ]);
+
+  assert.equal(
+    convertHtmlTreeToMarkdown(table),
+    ['| Name | Value |', '| --- | --- |', '| Alpha | 42 |'].join('\n')
+  );
+});
+
+test('builds full-response markdown from the Gemini content root', () => {
+  const contentRoot = elementNode('div', {}, [
+    elementNode('p', {}, [textNode('Line one')]),
+    elementNode('p', {}, [textNode('Line two')])
+  ]);
+  const responseContainer = {
+    querySelector(selector) {
+      if (selector.includes('.markdown')) {
+        return contentRoot;
+      }
+      return null;
+    }
+  };
+
+  assert.equal(buildResponseMarkdown(responseContainer), 'Line one\n\nLine two');
 });
 
 test('resolves explicit and stable candidate image URLs', () => {

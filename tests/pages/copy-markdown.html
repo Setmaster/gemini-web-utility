@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gemini Copy Markdown Fixture</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 2rem;
+    }
+
+    .response-container {
+      border: 1px solid #dadce0;
+      border-radius: 1rem;
+      padding: 1rem;
+      max-width: 48rem;
+    }
+
+    .actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      align-items: center;
+    }
+
+    .markdown pre {
+      background: #f6f8fa;
+      padding: 0.75rem;
+      overflow: auto;
+    }
+
+    .markdown code {
+      font-family: monospace;
+    }
+  </style>
+  <script>
+    window.__gwuClipboard = { last: null };
+    window.__gwuLastCopy = null;
+
+    window.ClipboardItem = class ClipboardItem {
+      constructor(data) {
+        this.data = data;
+      }
+    };
+
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        async write(items) {
+          const item = items[0];
+          const out = {};
+          for (const [type, blob] of Object.entries(item.data || {})) {
+            out[type] = await blob.text();
+          }
+          window.__gwuClipboard.last = out;
+        },
+        async writeText(text) {
+          window.__gwuClipboard.last = { 'text/plain': text };
+        }
+      }
+    });
+
+    window.getLastClipboardWrite = function getLastClipboardWrite() {
+      return window.__gwuClipboard.last;
+    };
+
+    window.prepareSelectionCopy = function prepareSelectionCopy() {
+      const target = document.getElementById('response-content');
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      window.__gwuLastCopy = null;
+      document.addEventListener('copy', (event) => {
+        const types = {};
+        for (const type of event.clipboardData.types) {
+          types[type] = event.clipboardData.getData(type);
+        }
+        window.__gwuLastCopy = types;
+      }, { once: true });
+    };
+  </script>
+</head>
+<body>
+  <div class="response-container" id="response">
+    <h2>Gemini said</h2>
+    <div class="markdown" id="response-content">
+      <h3>Weekly Plan</h3>
+      <p>Hello <strong>world</strong>, this is a <a href="https://example.com">link</a>.</p>
+      <ul>
+        <li>Write tests</li>
+        <li>Ship code</li>
+      </ul>
+      <pre><code class="language-js">console.log('fixture');</code></pre>
+    </div>
+    <div class="actions">
+      <copy-button><button aria-label="Copy">Copy</button></copy-button>
+    </div>
+  </div>
+  <script src="../../gemini-web-utility.user.js"></script>
+</body>
+</html>
