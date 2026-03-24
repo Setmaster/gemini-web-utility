@@ -53,22 +53,30 @@ test('persists shortcut changes and reset through the GU panel', async () => {
     await expect(page.locator('#gwu-settings-panel')).toBeVisible();
     const panelStyle = await page.locator('#gwu-settings-panel').evaluate((panel) => {
       const styles = window.getComputedStyle(panel);
+      const scrollHost = panel.querySelector('.gwu-settings-panel-scroll');
+      const scrollStyles = window.getComputedStyle(scrollHost);
       const buttonStyles = window.getComputedStyle(document.getElementById('gwu-settings-button'));
       return {
         buttonRight: buttonStyles.right,
         buttonBottom: buttonStyles.bottom,
         panelRight: styles.right,
         panelBottom: styles.bottom,
-        overflowY: styles.overflowY,
-        scrollbarGutter: styles.scrollbarGutter
+        panelOverflow: styles.overflow,
+        panelRadius: styles.borderRadius,
+        scrollOverflowY: scrollStyles.overflowY,
+        scrollGutter: scrollStyles.scrollbarGutter,
+        scrollRadius: scrollStyles.borderRadius
       };
     });
     expect(panelStyle.buttonRight).toBe('24px');
     expect(panelStyle.buttonBottom).toBe('24px');
     expect(panelStyle.panelRight).toBe('24px');
     expect(panelStyle.panelBottom).toBe('76px');
-    expect(panelStyle.overflowY).toBe('scroll');
-    expect(panelStyle.scrollbarGutter).toContain('stable');
+    expect(panelStyle.panelOverflow).toBe('hidden');
+    expect(panelStyle.panelRadius).toBe('16px');
+    expect(panelStyle.scrollOverflowY).toBe('scroll');
+    expect(panelStyle.scrollGutter).toContain('stable');
+    expect(panelStyle.scrollRadius).toBe('16px');
 
     await page.locator('[data-gwu-shortcut-key="shortcutNewChat"]').click();
     await expect(page.locator('#gwu-shortcut-modal-overlay')).toBeVisible();

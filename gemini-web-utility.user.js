@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.5
+ * Version: 0.9.6
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.5';
+  const SCRIPT_VERSION = '0.9.6';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -2032,32 +2032,39 @@
       '  bottom: 4.75rem;',
       '  width: min(24rem, calc(100vw - 3rem));',
       '  max-height: min(70vh, 34rem);',
-      '  overflow-x: hidden;',
-      '  overflow-y: scroll;',
-      '  scrollbar-gutter: stable;',
-      '  scrollbar-width: thin;',
-      '  scrollbar-color: rgba(221, 203, 138, 0.58) rgba(11, 14, 14, 0.28);',
+      '  overflow: hidden;',
       '  z-index: 2147483646;',
       '  border-radius: 1rem;',
       '  border: 1px solid rgba(209, 217, 193, 0.16);',
       '  background: linear-gradient(180deg, rgba(25, 30, 29, 0.985), rgba(33, 39, 38, 0.985));',
       '  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.38);',
       '  color: #f4efe3;',
+      '  box-sizing: border-box;',
+      '}',
+      '#' + SETTINGS_PANEL_ID + ' > .gwu-settings-panel-scroll {',
+      '  max-height: calc(min(70vh, 34rem) - 2px);',
+      '  overflow-x: hidden;',
+      '  overflow-y: scroll;',
+      '  scrollbar-gutter: stable;',
+      '  scrollbar-width: thin;',
+      '  scrollbar-color: rgba(221, 203, 138, 0.58) rgba(11, 14, 14, 0.28);',
+      '  border-radius: inherit;',
+      '  box-sizing: border-box;',
       '  padding: 1rem;',
       '}',
-      '#' + SETTINGS_PANEL_ID + '::-webkit-scrollbar {',
+      '#' + SETTINGS_PANEL_ID + ' > .gwu-settings-panel-scroll::-webkit-scrollbar {',
       '  width: 0.72rem;',
       '}',
-      '#' + SETTINGS_PANEL_ID + '::-webkit-scrollbar-track {',
+      '#' + SETTINGS_PANEL_ID + ' > .gwu-settings-panel-scroll::-webkit-scrollbar-track {',
       '  background: rgba(11, 14, 14, 0.28);',
       '  border-radius: 999px;',
       '}',
-      '#' + SETTINGS_PANEL_ID + '::-webkit-scrollbar-thumb {',
+      '#' + SETTINGS_PANEL_ID + ' > .gwu-settings-panel-scroll::-webkit-scrollbar-thumb {',
       '  background: rgba(221, 203, 138, 0.58);',
       '  border-radius: 999px;',
       '  border: 2px solid rgba(11, 14, 14, 0.18);',
       '}',
-      '#' + SETTINGS_PANEL_ID + '::-webkit-scrollbar-thumb:hover {',
+      '#' + SETTINGS_PANEL_ID + ' > .gwu-settings-panel-scroll::-webkit-scrollbar-thumb:hover {',
       '  background: rgba(234, 216, 154, 0.76);',
       '}',
       '#' + SETTINGS_PANEL_ID + '[hidden] {',
@@ -2362,13 +2369,17 @@
       panel.id = SETTINGS_PANEL_ID;
       panel.hidden = true;
 
+      const panelScroll = document.createElement('div');
+      panelScroll.className = 'gwu-settings-panel-scroll';
+      panel.appendChild(panelScroll);
+
       const panelTitle = document.createElement('h2');
       panelTitle.textContent = 'Gemini Web Utility';
-      panel.appendChild(panelTitle);
+      panelScroll.appendChild(panelTitle);
 
       const panelDescription = document.createElement('p');
       panelDescription.textContent = 'Enable or disable shipped features. Changes apply immediately where possible.';
-      panel.appendChild(panelDescription);
+      panelScroll.appendChild(panelDescription);
 
       SETTINGS_OPTIONS.forEach((option) => {
         const row = document.createElement('label');
@@ -2392,12 +2403,12 @@
 
         row.appendChild(input);
         row.appendChild(text);
-        panel.appendChild(row);
+        panelScroll.appendChild(row);
       });
 
       const shortcutsTitle = document.createElement('h3');
       shortcutsTitle.textContent = 'Shortcuts';
-      panel.appendChild(shortcutsTitle);
+      panelScroll.appendChild(shortcutsTitle);
 
       SHORTCUT_OPTIONS.forEach((option) => {
         const wrapper = document.createElement('div');
@@ -2421,12 +2432,12 @@
         wrapper.appendChild(title);
         wrapper.appendChild(input);
         wrapper.appendChild(hint);
-        panel.appendChild(wrapper);
+        panelScroll.appendChild(wrapper);
       });
 
       const actionsTitle = document.createElement('h3');
       actionsTitle.textContent = 'Actions';
-      panel.appendChild(actionsTitle);
+      panelScroll.appendChild(actionsTitle);
 
       const resetButton = document.createElement('button');
       resetButton.id = SETTINGS_RESET_BUTTON_ID;
@@ -2437,7 +2448,7 @@
         closeShortcutModal();
         updateSettings(DEFAULT_SETTINGS);
       });
-      panel.appendChild(resetButton);
+      panelScroll.appendChild(resetButton);
 
       const exportButton = document.createElement('button');
       exportButton.id = EXPORT_CONVERSATION_BUTTON_ID;
@@ -2452,7 +2463,7 @@
           exportButton.textContent = originalText;
         }, 1400);
       });
-      panel.appendChild(exportButton);
+      panelScroll.appendChild(exportButton);
 
       const shortcutOverlay = document.createElement('div');
       shortcutOverlay.id = SETTINGS_SHORTCUT_MODAL_OVERLAY_ID;
