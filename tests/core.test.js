@@ -7,6 +7,8 @@ const {
   migrateSettings,
   parseShortcutDefinition,
   matchShortcutEvent,
+  formatShortcutDefinition,
+  formatShortcutEvent,
   isLikelyResponseExpandControl,
   convertHtmlTreeToMarkdown,
   buildResponseMarkdown,
@@ -307,6 +309,69 @@ test('matches keyboard events against shortcut definitions', () => {
       parseShortcutDefinition('Ctrl+Alt+N')
     ),
     false
+  );
+});
+
+test('formats shortcut definitions in canonical display order', () => {
+  assert.equal(
+    formatShortcutDefinition({
+      ctrl: true,
+      alt: true,
+      shift: false,
+      meta: false,
+      key: 'Space'
+    }),
+    'Ctrl+Alt+Space'
+  );
+});
+
+test('formats captured keyboard events into persisted shortcuts', () => {
+  assert.equal(
+    formatShortcutEvent({
+      key: 'u',
+      code: 'KeyU',
+      ctrlKey: true,
+      altKey: false,
+      shiftKey: false,
+      metaKey: false
+    }),
+    'Ctrl+U'
+  );
+
+  assert.equal(
+    formatShortcutEvent({
+      key: 'k',
+      code: 'KeyK',
+      ctrlKey: false,
+      altKey: true,
+      shiftKey: false,
+      metaKey: false
+    }),
+    'Alt+K'
+  );
+
+  assert.equal(
+    formatShortcutEvent({
+      key: ' ',
+      code: 'Space',
+      ctrlKey: true,
+      altKey: true,
+      shiftKey: false,
+      metaKey: false
+    }),
+    'Ctrl+Alt+Space'
+  );
+
+  assert.equal(
+    formatShortcutEvent({
+      key: 'Control',
+      code: 'ControlLeft',
+      ctrlKey: true,
+      altKey: false,
+      shiftKey: false,
+      metaKey: false
+    }),
+    ''
   );
 });
 

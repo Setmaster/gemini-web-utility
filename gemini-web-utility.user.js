@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.8
+// @version      0.8.9
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
 // @downloadURL  http://127.0.0.1:8765/gemini-web-utility.user.js
@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.8';
+  const SCRIPT_VERSION = '0.8.9';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -85,6 +85,11 @@
   const SETTINGS_BUTTON_ID = 'gwu-settings-button';
   const SETTINGS_PANEL_ID = 'gwu-settings-panel';
   const SETTINGS_STYLE_ID = 'gwu-settings-style';
+  const SETTINGS_SHORTCUT_MODAL_OVERLAY_ID = 'gwu-shortcut-modal-overlay';
+  const SETTINGS_SHORTCUT_MODAL_ID = 'gwu-shortcut-modal';
+  const SETTINGS_SHORTCUT_MODAL_TITLE_ID = 'gwu-shortcut-modal-title';
+  const SETTINGS_SHORTCUT_MODAL_HINT_ID = 'gwu-shortcut-modal-hint';
+  const SETTINGS_RESET_BUTTON_ID = 'gwu-reset-settings';
   const DEFAULT_SETTINGS = Object.freeze({
     cleanCopy: true,
     copyAsMarkdown: true,
@@ -425,7 +430,12 @@
   }
 
   function normalizeShortcutKey(key) {
-    const raw = String(key || '').trim();
+    const rawValue = String(key || '');
+    if (rawValue === ' ') {
+      return 'Space';
+    }
+
+    const raw = rawValue.trim();
     if (!raw) {
       return '';
     }
@@ -448,6 +458,9 @@
     }
     if (lowered === 'return') {
       return 'Enter';
+    }
+    if (lowered === 'space' || lowered === 'spacebar') {
+      return 'Space';
     }
     if (raw.length === 1) {
       return raw.toUpperCase();
@@ -499,6 +512,49 @@
       Boolean(event.shiftKey) === Boolean(definition.shift) &&
       Boolean(event.metaKey) === Boolean(definition.meta)
     );
+  }
+
+  function formatShortcutDefinition(definition) {
+    if (!definition || !definition.key) {
+      return '';
+    }
+
+    const parts = [];
+    if (definition.ctrl) {
+      parts.push('Ctrl');
+    }
+    if (definition.alt) {
+      parts.push('Alt');
+    }
+    if (definition.shift) {
+      parts.push('Shift');
+    }
+    if (definition.meta) {
+      parts.push('Meta');
+    }
+    parts.push(normalizeShortcutKey(definition.key));
+    return parts.join('+');
+  }
+
+  function formatShortcutEvent(event) {
+    if (!event) {
+      return '';
+    }
+
+    const key = normalizeShortcutKey(
+      event.key === ' ' || event.code === 'Space' ? 'Space' : event.key
+    );
+    if (!key || key === 'Control' || key === 'Alt' || key === 'Shift' || key === 'Meta') {
+      return '';
+    }
+
+    return formatShortcutDefinition({
+      ctrl: Boolean(event.ctrlKey),
+      alt: Boolean(event.altKey),
+      shift: Boolean(event.shiftKey),
+      meta: Boolean(event.metaKey),
+      key
+    });
   }
 
   function escapeRegExp(value) {
@@ -1749,13 +1805,27 @@
       '.gwu-shortcut-field strong {',
       '  color: #f8f4ea;',
       '}',
-      '.gwu-shortcut-field input {',
+      '.gwu-shortcut-field span {',
+      '  color: #bfcab9;',
+      '  font-size: 0.8rem;',
+      '}',
+      '.gwu-shortcut-field button {',
       '  border: 1px solid rgba(209, 217, 193, 0.18);',
       '  border-radius: 0.6rem;',
-      '  padding: 0.55rem 0.65rem;',
+      '  padding: 0.6rem 0.7rem;',
       '  font: inherit;',
+      '  text-align: left;',
       '  background: rgba(13, 16, 15, 0.9);',
       '  color: #f5efdf;',
+      '  cursor: pointer;',
+      '}',
+      '.gwu-shortcut-field button:hover {',
+      '  background: rgba(23, 28, 26, 0.96);',
+      '}',
+      '.gwu-shortcut-field button:focus-visible {',
+      '  border: 1px solid rgba(209, 217, 193, 0.18);',
+      '  outline: 2px solid rgba(221, 203, 138, 0.42);',
+      '  outline-offset: 2px;',
       '}',
       '.gwu-settings-action {',
       '  margin-top: 0.5rem;',
@@ -1769,6 +1839,63 @@
       '}',
       '.gwu-settings-action:hover {',
       '  background: rgba(134, 114, 47, 0.34);',
+      '}',
+      '.gwu-settings-action-secondary {',
+      '  border-color: rgba(209, 217, 193, 0.16);',
+      '  background: rgba(39, 47, 45, 0.86);',
+      '  color: #eef3e4;',
+      '}',
+      '.gwu-settings-action-secondary:hover {',
+      '  background: rgba(57, 67, 64, 0.94);',
+      '}',
+      '#' + SETTINGS_SHORTCUT_MODAL_OVERLAY_ID + ' {',
+      '  position: fixed;',
+      '  inset: 0;',
+      '  z-index: 2147483647;',
+      '  display: flex;',
+      '  align-items: center;',
+      '  justify-content: center;',
+      '  padding: 1rem;',
+      '  background: rgba(3, 5, 6, 0.68);',
+      '}',
+      '#' + SETTINGS_SHORTCUT_MODAL_OVERLAY_ID + '[hidden] {',
+      '  display: none;',
+      '}',
+      '#' + SETTINGS_SHORTCUT_MODAL_ID + ' {',
+      '  width: min(22rem, calc(100vw - 2rem));',
+      '  border-radius: 1rem;',
+      '  border: 1px solid rgba(209, 217, 193, 0.16);',
+      '  background: linear-gradient(180deg, rgba(19, 24, 24, 0.995), rgba(30, 36, 35, 0.995));',
+      '  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.42);',
+      '  color: #f7f3e7;',
+      '  padding: 1rem;',
+      '}',
+      '#' + SETTINGS_SHORTCUT_MODAL_ID + ' h3 {',
+      '  margin: 0 0 0.4rem;',
+      '  font-size: 1rem;',
+      '  color: #fbf8ef;',
+      '}',
+      '#' + SETTINGS_SHORTCUT_MODAL_ID + ' p {',
+      '  margin: 0;',
+      '  color: #d3dcc8;',
+      '  line-height: 1.45;',
+      '}',
+      '#' + SETTINGS_SHORTCUT_MODAL_HINT_ID + ' {',
+      '  display: block;',
+      '  margin-top: 0.8rem;',
+      '  border-radius: 0.7rem;',
+      '  background: rgba(13, 16, 15, 0.92);',
+      '  border: 1px solid rgba(209, 217, 193, 0.14);',
+      '  padding: 0.7rem 0.8rem;',
+      '  color: #f5efdf;',
+      '  font-weight: 700;',
+      '}',
+      '.gwu-shortcut-modal-actions {',
+      '  display: flex;',
+      '  justify-content: flex-end;',
+      '}',
+      '.gwu-shortcut-modal-actions .gwu-settings-action {',
+      '  margin-top: 1rem;',
       '}'
     ].join('\n');
     styleHost.appendChild(style);
@@ -1778,6 +1905,7 @@
     ensureSettingsStyles();
     let panelEventsBound = false;
     let ensureUiScheduled = false;
+    let captureState = null;
 
     function syncPanelState() {
       const panel = document.getElementById(SETTINGS_PANEL_ID);
@@ -1794,14 +1922,39 @@
       });
 
       SHORTCUT_OPTIONS.forEach((option) => {
-        const input = panel.querySelector('input[name="' + option.key + '"]');
-        if (input) {
-          input.value = settings[option.key] || DEFAULT_SETTINGS[option.key];
+        const trigger = panel.querySelector('[data-gwu-shortcut-key="' + option.key + '"]');
+        if (trigger) {
+          trigger.textContent = settings[option.key] || DEFAULT_SETTINGS[option.key];
         }
       });
+
+      const modalHint = document.getElementById(SETTINGS_SHORTCUT_MODAL_HINT_ID);
+      if (modalHint && captureState) {
+        modalHint.textContent = settings[captureState.key] || DEFAULT_SETTINGS[captureState.key];
+      }
+    }
+
+    function closeShortcutModal() {
+      const overlay = document.getElementById(SETTINGS_SHORTCUT_MODAL_OVERLAY_ID);
+      const previousState = captureState;
+      captureState = null;
+
+      if (overlay) {
+        overlay.hidden = true;
+      }
+
+      if (!previousState) {
+        return;
+      }
+
+      const trigger = document.querySelector('[data-gwu-shortcut-key="' + previousState.key + '"]');
+      if (trigger && typeof trigger.focus === 'function') {
+        trigger.focus();
+      }
     }
 
     function closePanel() {
+      closeShortcutModal();
       const panel = document.getElementById(SETTINGS_PANEL_ID);
       if (panel) {
         panel.hidden = true;
@@ -1816,6 +1969,27 @@
       panel.hidden = !panel.hidden;
       if (!panel.hidden) {
         syncPanelState();
+      } else {
+        closeShortcutModal();
+      }
+    }
+
+    function openShortcutModal(shortcutKey) {
+      const option = SHORTCUT_OPTIONS.find((candidate) => candidate.key === shortcutKey);
+      const overlay = document.getElementById(SETTINGS_SHORTCUT_MODAL_OVERLAY_ID);
+      const modalTitle = document.getElementById(SETTINGS_SHORTCUT_MODAL_TITLE_ID);
+      const modalHint = document.getElementById(SETTINGS_SHORTCUT_MODAL_HINT_ID);
+      const modal = document.getElementById(SETTINGS_SHORTCUT_MODAL_ID);
+      if (!option || !overlay || !modalTitle || !modalHint || !modal) {
+        return;
+      }
+
+      captureState = { key: shortcutKey };
+      modalTitle.textContent = option.label;
+      modalHint.textContent = getSettings()[shortcutKey] || DEFAULT_SETTINGS[shortcutKey];
+      overlay.hidden = false;
+      if (typeof modal.focus === 'function') {
+        modal.focus();
       }
     }
 
@@ -1826,6 +2000,24 @@
       panelEventsBound = true;
 
       document.addEventListener('keydown', (event) => {
+        if (captureState) {
+          if (event.key === 'Tab') {
+            event.preventDefault();
+            return;
+          }
+
+          const shortcut = formatShortcutEvent(event);
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (!shortcut) {
+            return;
+          }
+
+          updateSettings({ [captureState.key]: shortcut });
+          closeShortcutModal();
+          return;
+        }
+
         if (event.key === 'Escape') {
           closePanel();
         }
@@ -1836,7 +2028,11 @@
         if (!target) {
           return;
         }
-        if (target.closest('#' + SETTINGS_PANEL_ID) || target.closest('#' + SETTINGS_BUTTON_ID)) {
+        if (
+          target.closest('#' + SETTINGS_PANEL_ID) ||
+          target.closest('#' + SETTINGS_BUTTON_ID) ||
+          target.closest('#' + SETTINGS_SHORTCUT_MODAL_OVERLAY_ID)
+        ) {
           return;
         }
         closePanel();
@@ -1898,29 +2094,44 @@
       panel.appendChild(shortcutsTitle);
 
       SHORTCUT_OPTIONS.forEach((option) => {
-        const wrapper = document.createElement('label');
+        const wrapper = document.createElement('div');
         wrapper.className = 'gwu-shortcut-field';
 
         const title = document.createElement('strong');
         title.textContent = option.label;
 
-        const input = document.createElement('input');
-        input.type = 'text';
+        const input = document.createElement('button');
+        input.type = 'button';
         input.name = option.key;
-        input.value = getSettings()[option.key] || DEFAULT_SETTINGS[option.key];
-        input.placeholder = DEFAULT_SETTINGS[option.key];
-        input.addEventListener('change', () => {
-          updateSettings({ [option.key]: input.value.trim() || DEFAULT_SETTINGS[option.key] });
+        input.dataset.gwuShortcutKey = option.key;
+        input.textContent = getSettings()[option.key] || DEFAULT_SETTINGS[option.key];
+        input.addEventListener('click', () => {
+          openShortcutModal(option.key);
         });
+
+        const hint = document.createElement('span');
+        hint.textContent = 'Click to change';
 
         wrapper.appendChild(title);
         wrapper.appendChild(input);
+        wrapper.appendChild(hint);
         panel.appendChild(wrapper);
       });
 
       const actionsTitle = document.createElement('h3');
       actionsTitle.textContent = 'Actions';
       panel.appendChild(actionsTitle);
+
+      const resetButton = document.createElement('button');
+      resetButton.id = SETTINGS_RESET_BUTTON_ID;
+      resetButton.type = 'button';
+      resetButton.className = 'gwu-settings-action gwu-settings-action-secondary';
+      resetButton.textContent = 'Reset All Settings';
+      resetButton.addEventListener('click', () => {
+        closeShortcutModal();
+        updateSettings(DEFAULT_SETTINGS);
+      });
+      panel.appendChild(resetButton);
 
       const exportButton = document.createElement('button');
       exportButton.id = EXPORT_CONVERSATION_BUTTON_ID;
@@ -1937,8 +2148,51 @@
       });
       panel.appendChild(exportButton);
 
+      const shortcutOverlay = document.createElement('div');
+      shortcutOverlay.id = SETTINGS_SHORTCUT_MODAL_OVERLAY_ID;
+      shortcutOverlay.hidden = true;
+      shortcutOverlay.addEventListener('click', (event) => {
+        if (event.target === shortcutOverlay) {
+          closeShortcutModal();
+        }
+      });
+
+      const shortcutModal = document.createElement('section');
+      shortcutModal.id = SETTINGS_SHORTCUT_MODAL_ID;
+      shortcutModal.tabIndex = -1;
+      shortcutModal.setAttribute('role', 'dialog');
+      shortcutModal.setAttribute('aria-modal', 'true');
+      shortcutModal.setAttribute('aria-labelledby', SETTINGS_SHORTCUT_MODAL_TITLE_ID);
+
+      const shortcutModalTitle = document.createElement('h3');
+      shortcutModalTitle.id = SETTINGS_SHORTCUT_MODAL_TITLE_ID;
+      shortcutModalTitle.textContent = 'Shortcut';
+      shortcutModal.appendChild(shortcutModalTitle);
+
+      const shortcutModalDescription = document.createElement('p');
+      shortcutModalDescription.textContent = 'Press the new shortcut';
+      shortcutModal.appendChild(shortcutModalDescription);
+
+      const shortcutModalHint = document.createElement('div');
+      shortcutModalHint.id = SETTINGS_SHORTCUT_MODAL_HINT_ID;
+      shortcutModalHint.textContent = '';
+      shortcutModal.appendChild(shortcutModalHint);
+
+      const shortcutModalActions = document.createElement('div');
+      shortcutModalActions.className = 'gwu-shortcut-modal-actions';
+
+      const cancelShortcutButton = document.createElement('button');
+      cancelShortcutButton.type = 'button';
+      cancelShortcutButton.className = 'gwu-settings-action gwu-settings-action-secondary';
+      cancelShortcutButton.textContent = 'Cancel';
+      cancelShortcutButton.addEventListener('click', closeShortcutModal);
+      shortcutModalActions.appendChild(cancelShortcutButton);
+      shortcutModal.appendChild(shortcutModalActions);
+      shortcutOverlay.appendChild(shortcutModal);
+
       document.body.appendChild(button);
       document.body.appendChild(panel);
+      document.body.appendChild(shortcutOverlay);
       recordBootDebugEvent('settings-ui-attached', {
         href: location.href,
         readyState: document.readyState
@@ -2043,6 +2297,10 @@
 
         const target = event.target instanceof Element ? event.target : null;
         const panel = document.getElementById(SETTINGS_PANEL_ID);
+        const shortcutModalOverlay = document.getElementById(SETTINGS_SHORTCUT_MODAL_OVERLAY_ID);
+        if (shortcutModalOverlay && !shortcutModalOverlay.hidden) {
+          return;
+        }
         if (panel && !panel.hidden && target && target.closest('#' + SETTINGS_PANEL_ID)) {
           return;
         }
@@ -3636,6 +3894,8 @@
     migrateSettings,
     parseShortcutDefinition,
     matchShortcutEvent,
+    formatShortcutDefinition,
+    formatShortcutEvent,
     isLikelyResponseExpandControl,
     convertHtmlTreeToMarkdown,
     buildResponseMarkdown,
