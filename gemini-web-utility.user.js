@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.3
+ * Version: 0.9.4
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.3';
+  const SCRIPT_VERSION = '0.9.4';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -2032,7 +2032,11 @@
       '  bottom: 4.25rem;',
       '  width: min(24rem, calc(100vw - 2rem));',
       '  max-height: min(70vh, 34rem);',
-      '  overflow: auto;',
+      '  overflow-x: hidden;',
+      '  overflow-y: scroll;',
+      '  scrollbar-gutter: stable;',
+      '  scrollbar-width: thin;',
+      '  scrollbar-color: rgba(221, 203, 138, 0.58) rgba(11, 14, 14, 0.28);',
       '  z-index: 2147483646;',
       '  border-radius: 1rem;',
       '  border: 1px solid rgba(209, 217, 193, 0.16);',
@@ -2040,6 +2044,21 @@
       '  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.38);',
       '  color: #f4efe3;',
       '  padding: 1rem;',
+      '}',
+      '#' + SETTINGS_PANEL_ID + '::-webkit-scrollbar {',
+      '  width: 0.72rem;',
+      '}',
+      '#' + SETTINGS_PANEL_ID + '::-webkit-scrollbar-track {',
+      '  background: rgba(11, 14, 14, 0.28);',
+      '  border-radius: 999px;',
+      '}',
+      '#' + SETTINGS_PANEL_ID + '::-webkit-scrollbar-thumb {',
+      '  background: rgba(221, 203, 138, 0.58);',
+      '  border-radius: 999px;',
+      '  border: 2px solid rgba(11, 14, 14, 0.18);',
+      '}',
+      '#' + SETTINGS_PANEL_ID + '::-webkit-scrollbar-thumb:hover {',
+      '  background: rgba(234, 216, 154, 0.76);',
       '}',
       '#' + SETTINGS_PANEL_ID + '[hidden] {',
       '  display: none;',

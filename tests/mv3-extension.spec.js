@@ -51,6 +51,15 @@ test('persists shortcut changes and reset through the GU panel', async () => {
     await expect(page.locator('#gwu-settings-button')).toHaveText('GU');
     await page.locator('#gwu-settings-button').click();
     await expect(page.locator('#gwu-settings-panel')).toBeVisible();
+    const panelStyle = await page.locator('#gwu-settings-panel').evaluate((panel) => {
+      const styles = window.getComputedStyle(panel);
+      return {
+        overflowY: styles.overflowY,
+        scrollbarGutter: styles.scrollbarGutter
+      };
+    });
+    expect(panelStyle.overflowY).toBe('scroll');
+    expect(panelStyle.scrollbarGutter).toContain('stable');
 
     await page.locator('[data-gwu-shortcut-key="shortcutNewChat"]').click();
     await expect(page.locator('#gwu-shortcut-modal-overlay')).toBeVisible();
