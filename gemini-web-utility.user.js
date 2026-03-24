@@ -1,20 +1,13 @@
-// ==UserScript==
-// @name         Gemini Web Utility
-// @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.9
-// @description  Utilities for the Gemini web app.
-// @match        https://gemini.google.com/*
-// @downloadURL  http://127.0.0.1:8765/gemini-web-utility.user.js
-// @updateURL    http://127.0.0.1:8765/gemini-web-utility.user.js
-// @grant        GM_xmlhttpRequest
-// @grant        unsafeWindow
-// @run-at       document-start
-// ==/UserScript==
+/*
+ * Gemini Web Utility
+ * Version: 0.9.0
+ * Primary runtime: Manifest V3 Chrome extension content script
+ */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.9';
+  const SCRIPT_VERSION = '0.9.0';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -159,6 +152,7 @@
   const decodedAlphaMaps = new Map();
   let runtimeDebug = null;
   let runtimeSettings = null;
+  let extensionSettingsHydrationStarted = false;
   const settingsListeners = new Set();
   const bootDebugState = {
     version: SCRIPT_VERSION,
@@ -175,6 +169,97 @@
     }
 
     return null;
+  }
+
+  function getExtensionApi() {
+    if (typeof chrome !== 'undefined' && chrome && chrome.runtime && chrome.runtime.id) {
+      return chrome;
+    }
+
+    return null;
+  }
+
+  function hasExtensionRuntime() {
+    return Boolean(getExtensionApi());
+  }
+
+  function canUseExtensionStorage() {
+    const extensionApi = getExtensionApi();
+    return Boolean(extensionApi && extensionApi.storage && extensionApi.storage.local);
+  }
+
+  function canUseExtensionMessaging() {
+    const extensionApi = getExtensionApi();
+    return Boolean(extensionApi && extensionApi.runtime && typeof extensionApi.runtime.sendMessage === 'function');
+  }
+
+  function extensionStorageGet(keys) {
+    const extensionApi = getExtensionApi();
+    if (!extensionApi || !extensionApi.storage || !extensionApi.storage.local) {
+      return Promise.resolve({});
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        extensionApi.storage.local.get(keys, (items) => {
+          const error = extensionApi.runtime && extensionApi.runtime.lastError;
+          if (error) {
+            reject(new Error(error.message));
+            return;
+          }
+
+          resolve(items || {});
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  function extensionStorageSet(values) {
+    const extensionApi = getExtensionApi();
+    if (!extensionApi || !extensionApi.storage || !extensionApi.storage.local) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        extensionApi.storage.local.set(values, () => {
+          const error = extensionApi.runtime && extensionApi.runtime.lastError;
+          if (error) {
+            reject(new Error(error.message));
+            return;
+          }
+
+          resolve();
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  function extensionSendMessage(message) {
+    const extensionApi = getExtensionApi();
+    if (!extensionApi || !extensionApi.runtime || typeof extensionApi.runtime.sendMessage !== 'function') {
+      return Promise.reject(new Error('Extension messaging unavailable'));
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        extensionApi.runtime.sendMessage(message, (response) => {
+          const error = extensionApi.runtime && extensionApi.runtime.lastError;
+          if (error) {
+            reject(new Error(error.message));
+            return;
+          }
+
+          resolve(response);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
 
   function readStorageValue(key) {
@@ -212,6 +297,17 @@
 
   function pushRemoteDebugEvent(entry) {
     if (!isRemoteDebugEnabled()) {
+      return;
+    }
+
+    if (canUseExtensionMessaging()) {
+      extensionSendMessage({
+        type: 'gwu-post-debug',
+        endpoint: getRemoteDebugEndpoint(),
+        payload: entry
+      }).catch(() => {
+        // Ignore extension transport failures and continue with local fallback paths.
+      });
       return;
     }
 
@@ -341,6 +437,33 @@
     return nextSettings;
   }
 
+  function parseStoredSettingsRecord(rawValue) {
+    if (!rawValue) {
+      return {
+        settings: sanitizeSettings(),
+        changed: false,
+        hadValue: false
+      };
+    }
+
+    try {
+      const parsedSettings = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
+      const sanitizedSettings = sanitizeSettings(parsedSettings);
+      const migration = migrateSettings(parsedSettings, sanitizedSettings);
+      return {
+        settings: migration.settings,
+        changed: migration.changed,
+        hadValue: true
+      };
+    } catch {
+      return {
+        settings: sanitizeSettings(),
+        changed: false,
+        hadValue: false
+      };
+    }
+  }
+
   function migrateSettings(rawSettings, sanitizedSettings) {
     const nextSettings = Object.assign({}, sanitizedSettings);
     let changed = false;
@@ -368,20 +491,87 @@
 
     try {
       const rawValue = localStorage.getItem(SETTINGS_STORAGE_KEY);
-      if (!rawValue) {
-        return sanitizeSettings();
-      }
-      const parsedSettings = JSON.parse(rawValue);
-      const sanitizedSettings = sanitizeSettings(parsedSettings);
-      const migration = migrateSettings(parsedSettings, sanitizedSettings);
+      const parsed = parseStoredSettingsRecord(rawValue);
 
-      if (migration.changed) {
-        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(migration.settings));
+      if (parsed.changed) {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(parsed.settings));
       }
 
-      return migration.settings;
+      return parsed.settings;
     } catch {
       return sanitizeSettings();
+    }
+  }
+
+  function persistSettingsToLocalStorage(settings) {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Ignore page-local persistence failures.
+    }
+  }
+
+  async function hydrateExtensionSettings() {
+    if (!canUseExtensionStorage()) {
+      return getSettings();
+    }
+
+    try {
+      const storedValues = await extensionStorageGet([SETTINGS_STORAGE_KEY]);
+      const extensionRecord = parseStoredSettingsRecord(storedValues[SETTINGS_STORAGE_KEY]);
+      const pageRecord = parseStoredSettingsRecord(readStorageValue(SETTINGS_STORAGE_KEY));
+      const nextSettings = extensionRecord.hadValue ? extensionRecord.settings : pageRecord.settings;
+
+      runtimeSettings = nextSettings;
+      notifySettingsListeners(nextSettings);
+
+      if (!extensionRecord.hadValue || extensionRecord.changed) {
+        await extensionStorageSet({
+          [SETTINGS_STORAGE_KEY]: nextSettings
+        });
+      }
+
+      persistSettingsToLocalStorage(nextSettings);
+      return nextSettings;
+    } catch {
+      runtimeSettings = loadStoredSettings();
+      notifySettingsListeners(runtimeSettings);
+      return runtimeSettings;
+    }
+  }
+
+  function startExtensionSettingsHydration() {
+    if (extensionSettingsHydrationStarted || !canUseExtensionStorage()) {
+      return;
+    }
+
+    extensionSettingsHydrationStarted = true;
+    hydrateExtensionSettings().catch(() => {
+      // Keep default or local settings when extension storage hydration fails.
+    });
+
+    const extensionApi = getExtensionApi();
+    if (
+      extensionApi &&
+      extensionApi.storage &&
+      typeof extensionApi.storage.onChanged !== 'undefined' &&
+      extensionApi.storage.onChanged &&
+      typeof extensionApi.storage.onChanged.addListener === 'function'
+    ) {
+      extensionApi.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== 'local' || !changes[SETTINGS_STORAGE_KEY]) {
+          return;
+        }
+
+        const nextRecord = parseStoredSettingsRecord(changes[SETTINGS_STORAGE_KEY].newValue);
+        runtimeSettings = nextRecord.settings;
+        persistSettingsToLocalStorage(nextRecord.settings);
+        notifySettingsListeners(nextRecord.settings);
+      });
     }
   }
 
@@ -389,6 +579,11 @@
     if (!runtimeSettings) {
       runtimeSettings = loadStoredSettings();
     }
+
+    if (canUseExtensionStorage()) {
+      startExtensionSettingsHydration();
+    }
+
     return runtimeSettings;
   }
 
@@ -416,13 +611,14 @@
   function updateSettings(patch) {
     const nextSettings = sanitizeSettings(Object.assign({}, getSettings(), patch));
     runtimeSettings = nextSettings;
+    persistSettingsToLocalStorage(nextSettings);
 
-    if (typeof localStorage !== 'undefined') {
-      try {
-        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextSettings));
-      } catch {
-        // Ignore persistence failures, the in-memory settings still apply.
-      }
+    if (canUseExtensionStorage()) {
+      extensionStorageSet({
+        [SETTINGS_STORAGE_KEY]: nextSettings
+      }).catch(() => {
+        // Ignore extension persistence failures, the in-memory settings still apply.
+      });
     }
 
     notifySettingsListeners(nextSettings);
@@ -2382,6 +2578,22 @@
     return null;
   }
 
+  async function requestBlobWithExtensionApi(url) {
+    const response = await extensionSendMessage({
+      type: 'gwu-fetch-blob',
+      url
+    });
+
+    if (!response || response.ok !== true || !response.base64) {
+      throw new Error((response && response.error) || 'Extension fetch bridge failed');
+    }
+
+    const bytes = decodeBase64(response.base64);
+    return new Blob([bytes], {
+      type: response.contentType || 'application/octet-stream'
+    });
+  }
+
   function getEmbeddedAlphaMap(size) {
     const knownSize = Number(size);
     if (!(knownSize in EMBEDDED_ALPHA_MAP_BASE64)) {
@@ -3172,6 +3384,10 @@
   }
 
   function installGeminiDownloadHook() {
+    if (hasExtensionRuntime()) {
+      return;
+    }
+
     const pageWindow = getPageWindow();
     if (!pageWindow || typeof pageWindow.fetch !== 'function') {
       return;
@@ -3288,6 +3504,10 @@
   }
 
   async function fetchBlobWithBypass(url) {
+    if (canUseExtensionMessaging()) {
+      return requestBlobWithExtensionApi(url);
+    }
+
     const userscriptRequest = getUserscriptRequestApi();
     if (userscriptRequest) {
       return requestBlobWithUserscriptApi(url);

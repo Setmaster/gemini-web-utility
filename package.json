@@ -1,0 +1,14 @@
+{
+  "name": "gemini-web-utility",
+  "private": true,
+  "version": "0.9.0",
+  "description": "Manifest V3 extension utilities for the Gemini web app.",
+  "scripts": {
+    "test:unit": "node --test tests/core.test.js",
+    "test:mv3": "playwright test tests/mv3-extension.spec.js --config=tests/playwright.mv3.config.js",
+    "test": "npm run test:unit && npm run test:mv3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.1"
+  }
+}
