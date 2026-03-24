@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.1
+ * Version: 0.9.2
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.1';
+  const SCRIPT_VERSION = '0.9.2';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -1387,22 +1387,113 @@
       return false;
     }
 
+    function fallbackWriteClipboardPayload() {
+      if (
+        typeof document === 'undefined' ||
+        typeof document.execCommand !== 'function'
+      ) {
+        return false;
+      }
+
+      const host = document.body || document.documentElement;
+      if (!host) {
+        return false;
+      }
+
+      const textarea = document.createElement('textarea');
+      textarea.value = payload.text;
+      textarea.setAttribute('readonly', 'true');
+      textarea.setAttribute('aria-hidden', 'true');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '0';
+      textarea.style.left = '-9999px';
+      textarea.style.opacity = '0';
+
+      const selection = typeof window.getSelection === 'function' ? window.getSelection() : null;
+      const previousRanges = [];
+      if (selection) {
+        for (let index = 0; index < selection.rangeCount; index += 1) {
+          previousRanges.push(selection.getRangeAt(index).cloneRange());
+        }
+      }
+
+      const previousActiveElement = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+      function handleCopy(event) {
+        if (!event.clipboardData) {
+          return;
+        }
+        event.preventDefault();
+        event.clipboardData.setData('text/plain', payload.text);
+        if (payload.markdown) {
+          event.clipboardData.setData('text/markdown', payload.markdown);
+        }
+        if (payload.html) {
+          event.clipboardData.setData('text/html', payload.html);
+        }
+      }
+
+      host.appendChild(textarea);
+      document.addEventListener('copy', handleCopy, true);
+      textarea.focus();
+      textarea.select();
+
+      let copied = false;
+      try {
+        copied = document.execCommand('copy');
+      } catch {
+        copied = false;
+      }
+
+      document.removeEventListener('copy', handleCopy, true);
+      textarea.remove();
+
+      if (selection) {
+        selection.removeAllRanges();
+        previousRanges.forEach((range) => selection.addRange(range));
+      }
+
+      if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+        previousActiveElement.focus();
+      }
+
+      return copied;
+    }
+
     if (navigator.clipboard && typeof navigator.clipboard.write === 'function' && typeof ClipboardItem !== 'undefined') {
-      const itemData = {
-        'text/plain': new Blob([payload.text], { type: 'text/plain' })
-      };
-      if (payload.markdown) {
-        itemData['text/markdown'] = new Blob([payload.markdown], { type: 'text/markdown' });
+      try {
+        const itemData = {
+          'text/plain': new Blob([payload.text], { type: 'text/plain' })
+        };
+        if (payload.markdown) {
+          itemData['text/markdown'] = new Blob([payload.markdown], { type: 'text/markdown' });
+        }
+        if (payload.html) {
+          itemData['text/html'] = new Blob([payload.html], { type: 'text/html' });
+        }
+        await navigator.clipboard.write([new ClipboardItem(itemData)]);
+        return true;
+      } catch {
+        if (fallbackWriteClipboardPayload()) {
+          return true;
+        }
       }
-      if (payload.html) {
-        itemData['text/html'] = new Blob([payload.html], { type: 'text/html' });
-      }
-      await navigator.clipboard.write([new ClipboardItem(itemData)]);
-      return true;
     }
 
     if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-      await navigator.clipboard.writeText(payload.markdown || payload.text);
+      try {
+        await navigator.clipboard.writeText(payload.markdown || payload.text);
+        return true;
+      } catch {
+        if (fallbackWriteClipboardPayload()) {
+          return true;
+        }
+      }
+    }
+
+    if (fallbackWriteClipboardPayload()) {
       return true;
     }
 

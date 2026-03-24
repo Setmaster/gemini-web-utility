@@ -64,14 +64,7 @@
       return window.__gwuClipboard.last;
     };
 
-    window.prepareSelectionCopy = function prepareSelectionCopy() {
-      const target = document.getElementById('response-content');
-      const range = document.createRange();
-      range.selectNodeContents(target);
-      const selection = window.getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
-
+    window.beginCopyCapture = function beginCopyCapture() {
       window.__gwuLastCopy = null;
       document.addEventListener('copy', (event) => {
         const types = {};
@@ -81,24 +74,36 @@
         window.__gwuLastCopy = types;
       }, { once: true });
     };
+
+    window.prepareSelectionCopy = function prepareSelectionCopy() {
+      const target = document.getElementById('selection-root');
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      window.beginCopyCapture();
+    };
   </script>
 </head>
 <body>
   <div class="response-container" id="response">
-    <h2>Gemini said</h2>
-    <div class="markdown" id="response-content">
-      <h3>Weekly Plan</h3>
-      <p>Hello <strong>world</strong>, this is a <a href="https://example.com">link</a>.</p>
-      <ul>
-        <li>Write tests</li>
-        <li>Ship code</li>
-      </ul>
-      <pre><code class="language-js">console.log('fixture');</code></pre>
+    <div id="selection-root">
+      <h2>Gemini said</h2>
+      <div class="markdown" id="response-content">
+        <h3>Weekly Plan</h3>
+        <p>Hello <strong>world</strong>, this is a <a href="https://example.com">link</a>.</p>
+        <ul>
+          <li>Write tests</li>
+          <li>Ship code</li>
+        </ul>
+        <pre><code class="language-js">console.log('fixture');</code></pre>
+      </div>
     </div>
     <div class="actions">
       <copy-button><button aria-label="Copy">Copy</button></copy-button>
     </div>
   </div>
-  <script src="../../gemini-web-utility.user.js"></script>
 </body>
 </html>

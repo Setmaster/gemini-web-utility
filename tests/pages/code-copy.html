@@ -47,6 +47,8 @@
   </style>
   <script>
     window.__gwuClipboard = { last: null };
+    window.__gwuLastCopy = null;
+    window.__nativeCodeCopyClicked = false;
 
     window.ClipboardItem = class ClipboardItem {
       constructor(data) {
@@ -74,6 +76,25 @@
     window.getLastClipboardWrite = function getLastClipboardWrite() {
       return window.__gwuClipboard.last;
     };
+
+    window.beginCopyCapture = function beginCopyCapture() {
+      window.__gwuLastCopy = null;
+      document.addEventListener('copy', (event) => {
+        const types = {};
+        for (const type of event.clipboardData.types) {
+          types[type] = event.clipboardData.getData(type);
+        }
+        window.__gwuLastCopy = types;
+      }, { once: true });
+    };
+
+    window.getCodeCopyState = function getCodeCopyState() {
+      return {
+        lastCopy: window.__gwuLastCopy,
+        stub: window.__gwuClipboard.last,
+        nativeClicked: window.__nativeCodeCopyClicked
+      };
+    };
   </script>
 </head>
 <body>
@@ -89,6 +110,10 @@
       </div>
     </div>
   </div>
-  <script src="../../gemini-web-utility.user.js"></script>
+  <script>
+    document.querySelector('button[aria-label="Copy code"]').addEventListener('click', () => {
+      window.__nativeCodeCopyClicked = true;
+    });
+  </script>
 </body>
 </html>
