@@ -5,7 +5,10 @@ function isAllowedFetchUrl(url) {
     const parsedUrl = new URL(String(url || ''));
     const hostname = parsedUrl.hostname.toLowerCase();
 
-    if (parsedUrl.protocol === 'https:' && hostname.endsWith('googleusercontent.com')) {
+    if (
+      parsedUrl.protocol === 'https:' &&
+      (hostname.endsWith('googleusercontent.com') || hostname === 'lh3.google.com')
+    ) {
       return true;
     }
 
@@ -77,34 +80,42 @@ async function postDebugPayload(endpoint, payload) {
   };
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || typeof message !== 'object') {
+if (typeof chrome !== 'undefined' && chrome && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || typeof message !== 'object') {
+      return false;
+    }
+
+    if (message.type === 'gwu-fetch-blob') {
+      fetchBlobPayload(message.url)
+        .then(sendResponse)
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error && error.message ? error.message : String(error)
+          });
+        });
+      return true;
+    }
+
+    if (message.type === 'gwu-post-debug') {
+      postDebugPayload(message.endpoint, message.payload)
+        .then(sendResponse)
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error && error.message ? error.message : String(error)
+          });
+        });
+      return true;
+    }
+
     return false;
-  }
+  });
+}
 
-  if (message.type === 'gwu-fetch-blob') {
-    fetchBlobPayload(message.url)
-      .then(sendResponse)
-      .catch((error) => {
-        sendResponse({
-          ok: false,
-          error: error && error.message ? error.message : String(error)
-        });
-      });
-    return true;
-  }
-
-  if (message.type === 'gwu-post-debug') {
-    postDebugPayload(message.endpoint, message.payload)
-      .then(sendResponse)
-      .catch((error) => {
-        sendResponse({
-          ok: false,
-          error: error && error.message ? error.message : String(error)
-        });
-      });
-    return true;
-  }
-
-  return false;
-});
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    isAllowedFetchUrl
+  };
+}

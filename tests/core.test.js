@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { isAllowedFetchUrl } = require('../service_worker.js');
 
 const {
   sanitizeLeadingResponseLabel,
@@ -273,6 +274,21 @@ test('migrates legacy new chat shortcut defaults forward', () => {
       },
       changed: true
     }
+  );
+});
+
+test('allows redirected Gemini image hosts in the MV3 fetch bridge', () => {
+  assert.equal(
+    isAllowedFetchUrl('https://lh3.googleusercontent.com/gg/example=s1024-rj'),
+    true
+  );
+  assert.equal(
+    isAllowedFetchUrl('https://lh3.google.com/rd-gg/example=s1024-rj'),
+    true
+  );
+  assert.equal(
+    isAllowedFetchUrl('https://example.com/image.png'),
+    false
   );
 });
 
