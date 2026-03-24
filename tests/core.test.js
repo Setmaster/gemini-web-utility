@@ -231,7 +231,7 @@ test('sanitizes settings payloads against known defaults', () => {
     sanitizeSettings({
       cleanCopy: false,
       copyAsMarkdown: true,
-      shortcutSubmit: 'Shift+Enter',
+      shortcutNewChat: 'Alt+N',
       unknownSetting: false
     }),
     {
@@ -241,18 +241,17 @@ test('sanitizes settings payloads against known defaults', () => {
       watermarkRemoval: true,
       autoExpandResponses: true,
       keyboardShortcutsEnabled: true,
-      shortcutNewChat: 'Ctrl+Shift+N',
-      shortcutSubmit: 'Shift+Enter',
+      shortcutNewChat: 'Alt+N',
       shortcutStop: 'Escape'
     }
   );
 });
 
 test('parses configurable keyboard shortcuts', () => {
-  assert.deepEqual(parseShortcutDefinition('Ctrl+Shift+N'), {
+  assert.deepEqual(parseShortcutDefinition('Ctrl+Alt+N'), {
     ctrl: true,
-    alt: false,
-    shift: true,
+    alt: true,
+    shift: false,
     meta: false,
     key: 'N'
   });
@@ -269,16 +268,16 @@ test('parses configurable keyboard shortcuts', () => {
 test('matches keyboard events against shortcut definitions', () => {
   assert.equal(
     matchShortcutEvent(
-      { key: 'Enter', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false },
-      parseShortcutDefinition('Ctrl+Enter')
+      { key: 'N', ctrlKey: true, altKey: true, shiftKey: false, metaKey: false },
+      parseShortcutDefinition('Ctrl+Alt+N')
     ),
     true
   );
 
   assert.equal(
     matchShortcutEvent(
-      { key: 'Enter', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false },
-      parseShortcutDefinition('Ctrl+Enter')
+      { key: 'N', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false },
+      parseShortcutDefinition('Ctrl+Alt+N')
     ),
     false
   );

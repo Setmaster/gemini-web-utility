@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.6
+// @version      0.8.7
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
 // @downloadURL  http://127.0.0.1:8765/gemini-web-utility.user.js
@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.6';
+  const SCRIPT_VERSION = '0.8.7';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -92,8 +92,7 @@
     watermarkRemoval: true,
     autoExpandResponses: true,
     keyboardShortcutsEnabled: true,
-    shortcutNewChat: 'Ctrl+Shift+N',
-    shortcutSubmit: 'Ctrl+Enter',
+    shortcutNewChat: 'Ctrl+Alt+N',
     shortcutStop: 'Escape'
   });
   const SETTINGS_OPTIONS = [
@@ -125,12 +124,11 @@
     {
       key: 'keyboardShortcutsEnabled',
       label: 'Keyboard Shortcuts',
-      description: 'Enable global shortcuts for new chat, submit, and stop.'
+      description: 'Enable global shortcuts for new chat and stop.'
     }
   ];
   const SHORTCUT_OPTIONS = [
     { key: 'shortcutNewChat', label: 'New chat' },
-    { key: 'shortcutSubmit', label: 'Submit prompt' },
     { key: 'shortcutStop', label: 'Stop generation' }
   ];
 
@@ -1635,9 +1633,9 @@
       '  width: 2.75rem;',
       '  height: 2.75rem;',
       '  border-radius: 999px;',
-      '  border: 1px solid rgba(60, 64, 67, 0.16);',
-      '  background: rgba(255, 255, 255, 0.95);',
-      '  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);',
+      '  border: 1px solid rgba(209, 217, 193, 0.18);',
+      '  background: rgba(25, 30, 29, 0.96);',
+      '  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);',
       '  cursor: pointer;',
       '  display: flex;',
       '  align-items: center;',
@@ -1646,7 +1644,13 @@
       '  font-size: 0.92rem;',
       '  font-weight: 800;',
       '  letter-spacing: -0.06em;',
-      '  color: #202124;',
+      '  color: #f3efe2;',
+      '  transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease;',
+      '}',
+      '#' + SETTINGS_BUTTON_ID + ':hover {',
+      '  background: rgba(39, 47, 45, 0.98);',
+      '  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.36);',
+      '  transform: translateY(-1px);',
       '}',
       '#' + SETTINGS_PANEL_ID + ' {',
       '  position: fixed;',
@@ -1657,9 +1661,10 @@
       '  overflow: auto;',
       '  z-index: 2147483646;',
       '  border-radius: 1rem;',
-      '  border: 1px solid rgba(60, 64, 67, 0.16);',
-      '  background: rgba(255, 255, 255, 0.98);',
-      '  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);',
+      '  border: 1px solid rgba(209, 217, 193, 0.16);',
+      '  background: linear-gradient(180deg, rgba(25, 30, 29, 0.985), rgba(33, 39, 38, 0.985));',
+      '  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.38);',
+      '  color: #f4efe3;',
       '  padding: 1rem;',
       '}',
       '#' + SETTINGS_PANEL_ID + '[hidden] {',
@@ -1668,15 +1673,18 @@
       '#' + SETTINGS_PANEL_ID + ' h2 {',
       '  margin: 0 0 0.35rem;',
       '  font-size: 1rem;',
+      '  color: #fbf8ef;',
       '}',
       '#' + SETTINGS_PANEL_ID + ' p {',
       '  margin: 0 0 1rem;',
-      '  color: #5f6368;',
+      '  color: #d3dcc8;',
       '  font-size: 0.9rem;',
+      '  line-height: 1.45;',
       '}',
       '#' + SETTINGS_PANEL_ID + ' h3 {',
       '  margin: 1rem 0 0.5rem;',
       '  font-size: 0.9rem;',
+      '  color: #efe6c8;',
       '}',
       '.gwu-settings-option {',
       '  display: grid;',
@@ -1684,41 +1692,52 @@
       '  gap: 0.75rem;',
       '  align-items: start;',
       '  padding: 0.7rem 0;',
-      '  border-top: 1px solid rgba(60, 64, 67, 0.08);',
+      '  border-top: 1px solid rgba(209, 217, 193, 0.12);',
       '}',
       '.gwu-settings-option:first-of-type {',
       '  border-top: none;',
       '}',
+      '.gwu-settings-option input[type="checkbox"] {',
+      '  accent-color: #cdbb73;',
+      '}',
       '.gwu-settings-option strong {',
       '  display: block;',
       '  margin-bottom: 0.15rem;',
+      '  color: #f8f4ea;',
       '}',
       '.gwu-settings-option span {',
-      '  color: #5f6368;',
+      '  color: #c8d2c1;',
       '  font-size: 0.85rem;',
+      '  line-height: 1.4;',
       '}',
       '.gwu-shortcut-field {',
       '  display: grid;',
       '  gap: 0.35rem;',
       '  margin-top: 0.75rem;',
       '}',
+      '.gwu-shortcut-field strong {',
+      '  color: #f8f4ea;',
+      '}',
       '.gwu-shortcut-field input {',
-      '  border: 1px solid rgba(60, 64, 67, 0.16);',
+      '  border: 1px solid rgba(209, 217, 193, 0.18);',
       '  border-radius: 0.6rem;',
       '  padding: 0.55rem 0.65rem;',
       '  font: inherit;',
+      '  background: rgba(13, 16, 15, 0.9);',
+      '  color: #f5efdf;',
       '}',
       '.gwu-settings-action {',
       '  margin-top: 0.5rem;',
-      '  border: 1px solid rgba(60, 64, 67, 0.16);',
-      '  background: rgba(60, 64, 67, 0.04);',
+      '  border: 1px solid rgba(221, 203, 138, 0.26);',
+      '  background: rgba(101, 86, 36, 0.24);',
       '  border-radius: 0.65rem;',
       '  padding: 0.65rem 0.9rem;',
       '  font: inherit;',
       '  cursor: pointer;',
+      '  color: #fbf6e4;',
       '}',
       '.gwu-settings-action:hover {',
-      '  background: rgba(60, 64, 67, 0.08);',
+      '  background: rgba(134, 114, 47, 0.34);',
       '}'
     ].join('\n');
     styleHost.appendChild(style);
@@ -2003,11 +2022,6 @@
             action: 'newChat',
             definition: parseShortcutDefinition(settings.shortcutNewChat),
             requiresEditable: false
-          },
-          {
-            action: 'submit',
-            definition: parseShortcutDefinition(settings.shortcutSubmit),
-            requiresEditable: true
           },
           {
             action: 'stop',
