@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.5
+// @version      0.8.6
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
 // @downloadURL  http://127.0.0.1:8765/gemini-web-utility.user.js
@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.5';
+  const SCRIPT_VERSION = '0.8.6';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -1809,7 +1809,14 @@
       const panel = document.createElement('section');
       panel.id = SETTINGS_PANEL_ID;
       panel.hidden = true;
-      panel.innerHTML = '<h2>Gemini Web Utility</h2><p>Enable or disable shipped features. Changes apply immediately where possible.</p>';
+
+      const panelTitle = document.createElement('h2');
+      panelTitle.textContent = 'Gemini Web Utility';
+      panel.appendChild(panelTitle);
+
+      const panelDescription = document.createElement('p');
+      panelDescription.textContent = 'Enable or disable shipped features. Changes apply immediately where possible.';
+      panel.appendChild(panelDescription);
 
       SETTINGS_OPTIONS.forEach((option) => {
         const row = document.createElement('label');
