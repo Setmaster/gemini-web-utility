@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.4
+// @version      0.8.5
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
 // @downloadURL  http://127.0.0.1:8765/gemini-web-utility.user.js
@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.4';
+  const SCRIPT_VERSION = '0.8.5';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -1882,6 +1882,10 @@
 
       document.body.appendChild(button);
       document.body.appendChild(panel);
+      recordBootDebugEvent('settings-ui-attached', {
+        href: location.href,
+        readyState: document.readyState
+      });
       bindPanelEvents();
     }
 
