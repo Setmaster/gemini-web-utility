@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.2
+ * Version: 0.9.3
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.2';
+  const SCRIPT_VERSION = '0.9.3';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
