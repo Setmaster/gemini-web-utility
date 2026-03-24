@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gemini Settings Rehydrate Fixture</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 0;
+        padding: 2rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Settings Rehydrate Fixture</h1>
+      <p>This page removes the userscript controls once to simulate a body rerender.</p>
+    </main>
+    <script>
+      window.setTimeout(() => {
+        document.getElementById('gwu-settings-button')?.remove();
+        document.getElementById('gwu-settings-panel')?.remove();
+      }, 100);
+    </script>
+  </body>
+</html>

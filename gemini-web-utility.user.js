@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.1
+// @version      0.8.2
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -1018,6 +1018,14 @@
       return;
     }
 
+    const styleHost = document.head || document.documentElement;
+    if (!styleHost) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', ensureCopyMarkdownStyles, { once: true });
+      }
+      return;
+    }
+
     const style = document.createElement('style');
     style.id = COPY_MARKDOWN_STYLE_ID;
     style.textContent = [
@@ -1033,7 +1041,7 @@
       '  background: rgba(60, 64, 67, 0.08);',
       '}'
     ].join('\n');
-    document.head.appendChild(style);
+    styleHost.appendChild(style);
   }
 
   function findResponseActionAnchor(responseContainer) {
@@ -1445,6 +1453,14 @@
       return;
     }
 
+    const styleHost = document.head || document.documentElement;
+    if (!styleHost) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', ensureSettingsStyles, { once: true });
+      }
+      return;
+    }
+
     const style = document.createElement('style');
     style.id = SETTINGS_STYLE_ID;
     style.textContent = [
@@ -1542,11 +1558,13 @@
       '  background: rgba(60, 64, 67, 0.08);',
       '}'
     ].join('\n');
-    document.head.appendChild(style);
+    styleHost.appendChild(style);
   }
 
   function installSettingsPanel() {
     ensureSettingsStyles();
+    let panelEventsBound = false;
+    let ensureUiScheduled = false;
 
     function syncPanelState() {
       const panel = document.getElementById(SETTINGS_PANEL_ID);
@@ -1586,6 +1604,30 @@
       if (!panel.hidden) {
         syncPanelState();
       }
+    }
+
+    function bindPanelEvents() {
+      if (panelEventsBound) {
+        return;
+      }
+      panelEventsBound = true;
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          closePanel();
+        }
+      });
+
+      document.addEventListener('click', (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target) {
+          return;
+        }
+        if (target.closest('#' + SETTINGS_PANEL_ID) || target.closest('#' + SETTINGS_BUTTON_ID)) {
+          return;
+        }
+        closePanel();
+      });
     }
 
     function ensureUi() {
@@ -1677,23 +1719,18 @@
 
       document.body.appendChild(button);
       document.body.appendChild(panel);
+      bindPanelEvents();
+    }
 
-      document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-          closePanel();
-        }
-      });
-
-      document.addEventListener('click', (event) => {
-        const target = event.target instanceof Element ? event.target : null;
-        if (!target) {
-          return;
-        }
-        if (target.closest('#' + SETTINGS_PANEL_ID) || target.closest('#' + SETTINGS_BUTTON_ID)) {
-          return;
-        }
-        closePanel();
-      });
+    function scheduleEnsureUi() {
+      if (ensureUiScheduled) {
+        return;
+      }
+      ensureUiScheduled = true;
+      window.setTimeout(() => {
+        ensureUiScheduled = false;
+        ensureUi();
+      }, 0);
     }
 
     if (document.readyState === 'loading') {
@@ -1702,6 +1739,26 @@
       ensureUi();
     }
 
+    const root = document.documentElement;
+    if (root && typeof MutationObserver !== 'undefined') {
+      const observer = new MutationObserver(() => {
+        if (!document.getElementById(SETTINGS_BUTTON_ID)) {
+          scheduleEnsureUi();
+        }
+      });
+      observer.observe(root, {
+        childList: true,
+        subtree: true
+      });
+    }
+
+    window.addEventListener('pageshow', scheduleEnsureUi);
+    window.addEventListener('focus', scheduleEnsureUi);
+    window.setInterval(() => {
+      if (!document.getElementById(SETTINGS_BUTTON_ID)) {
+        scheduleEnsureUi();
+      }
+    }, 1000);
     subscribeToSettings(syncPanelState);
   }
 
@@ -3048,7 +3105,7 @@
     }
 
     const debugApi = {
-      version: '0.8.1',
+      version: '0.8.2',
       events: [],
       clear() {
         this.events.length = 0;
