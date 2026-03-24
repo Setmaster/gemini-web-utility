@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.2
+// @version      0.8.3
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
+// @downloadURL  https://raw.githubusercontent.com/Setmaster/gemini-web-utility/master/gemini-web-utility.user.js
+// @updateURL    https://raw.githubusercontent.com/Setmaster/gemini-web-utility/master/gemini-web-utility.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @run-at       document-start
@@ -11,6 +13,13 @@
 
 (function () {
   'use strict';
+
+  const SCRIPT_VERSION = '0.8.3';
+  const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
+  const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
+  const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
+  const DEFAULT_REMOTE_DEBUG_ENDPOINT = 'http://127.0.0.1:8766/gwu-debug';
+  const MAX_BOOT_DEBUG_EVENTS = 80;
 
   const RESPONSE_CONTAINER_SELECTOR = '.response-container';
   const CONTENT_ROOT_SELECTOR = [
@@ -145,6 +154,160 @@
   let runtimeDebug = null;
   let runtimeSettings = null;
   const settingsListeners = new Set();
+  const bootDebugState = {
+    version: SCRIPT_VERSION,
+    events: []
+  };
+
+  function getUserscriptWindow() {
+    if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
+      return unsafeWindow;
+    }
+
+    if (typeof window !== 'undefined') {
+      return window;
+    }
+
+    return null;
+  }
+
+  function readStorageValue(key) {
+    if (typeof localStorage === 'undefined') {
+      return '';
+    }
+
+    try {
+      return localStorage.getItem(key) || '';
+    } catch {
+      return '';
+    }
+  }
+
+  function writeStorageValue(key, value) {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // Ignore boot-debug storage failures.
+    }
+  }
+
+  function getRemoteDebugEndpoint() {
+    const configuredEndpoint = readStorageValue(REMOTE_DEBUG_ENDPOINT_STORAGE_KEY).trim();
+    return configuredEndpoint || DEFAULT_REMOTE_DEBUG_ENDPOINT;
+  }
+
+  function isRemoteDebugEnabled() {
+    return readStorageValue(REMOTE_DEBUG_STORAGE_KEY) === '1';
+  }
+
+  function pushRemoteDebugEvent(entry) {
+    if (!isRemoteDebugEnabled()) {
+      return;
+    }
+
+    const requestApi =
+      typeof GM_xmlhttpRequest === 'function'
+        ? GM_xmlhttpRequest
+        : typeof GM !== 'undefined' && GM && typeof GM.xmlHttpRequest === 'function'
+          ? GM.xmlHttpRequest.bind(GM)
+          : null;
+
+    if (requestApi) {
+      try {
+        requestApi({
+          method: 'POST',
+          url: getRemoteDebugEndpoint(),
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          data: JSON.stringify(entry),
+          timeout: 2500
+        });
+        return;
+      } catch {
+        // Fall through to fetch when the userscript transport fails synchronously.
+      }
+    }
+
+    if (typeof fetch !== 'function') {
+      return;
+    }
+
+    try {
+      fetch(getRemoteDebugEndpoint(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(entry),
+        mode: 'cors',
+        keepalive: true
+      });
+    } catch {
+      // Ignore remote debug transport failures.
+    }
+  }
+
+  function exposeBootDebug() {
+    const pageWindow = getUserscriptWindow();
+    if (!pageWindow) {
+      return;
+    }
+
+    pageWindow.__gwuVersion = SCRIPT_VERSION;
+    pageWindow.__gwuBootDebug = {
+      version: SCRIPT_VERSION,
+      get events() {
+        return bootDebugState.events.slice();
+      },
+      dump() {
+        return JSON.stringify(
+          {
+            version: SCRIPT_VERSION,
+            events: bootDebugState.events.slice()
+          },
+          null,
+          2
+        );
+      }
+    };
+  }
+
+  function recordBootDebugEvent(type, details) {
+    const entry = Object.assign(
+      {
+        time: new Date().toISOString(),
+        version: SCRIPT_VERSION,
+        type
+      },
+      details || {}
+    );
+
+    bootDebugState.events.push(entry);
+    if (bootDebugState.events.length > MAX_BOOT_DEBUG_EVENTS) {
+      bootDebugState.events.splice(0, bootDebugState.events.length - MAX_BOOT_DEBUG_EVENTS);
+    }
+
+    writeStorageValue(
+      BOOT_DEBUG_STORAGE_KEY,
+      JSON.stringify({
+        version: SCRIPT_VERSION,
+        events: bootDebugState.events
+      })
+    );
+    exposeBootDebug();
+    pushRemoteDebugEvent(entry);
+  }
+
+  exposeBootDebug();
+  recordBootDebugEvent('boot', {
+    href: typeof location !== 'undefined' ? location.href : '',
+    readyState: typeof document !== 'undefined' ? document.readyState : 'no-document'
+  });
 
   function emitRuntimeDebugEvent(type, details) {
     if (runtimeDebug && typeof runtimeDebug.record === 'function') {
@@ -1890,15 +2053,7 @@
   }
 
   function getPageWindow() {
-    if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
-      return unsafeWindow;
-    }
-
-    if (typeof window !== 'undefined') {
-      return window;
-    }
-
-    return null;
+    return getUserscriptWindow();
   }
 
   function getUserscriptRequestApi() {
@@ -3105,7 +3260,7 @@
     }
 
     const debugApi = {
-      version: '0.8.2',
+      version: SCRIPT_VERSION,
       events: [],
       clear() {
         this.events.length = 0;
@@ -3139,12 +3294,35 @@
       dump() {
         return JSON.stringify(this.summary(), null, 2);
       },
+      bootDump() {
+        return readStorageValue(BOOT_DEBUG_STORAGE_KEY) || '';
+      },
       copy() {
         const dump = this.dump();
         if (typeof window.copy === 'function') {
           window.copy(dump);
         }
         return dump;
+      },
+      enableRemoteLogging(endpoint) {
+        writeStorageValue(REMOTE_DEBUG_STORAGE_KEY, '1');
+        if (typeof endpoint === 'string' && endpoint.trim()) {
+          writeStorageValue(REMOTE_DEBUG_ENDPOINT_STORAGE_KEY, endpoint.trim());
+        }
+        recordBootDebugEvent('remote-debug-enabled', {
+          endpoint: getRemoteDebugEndpoint()
+        });
+        return {
+          enabled: true,
+          endpoint: getRemoteDebugEndpoint()
+        };
+      },
+      disableRemoteLogging() {
+        writeStorageValue(REMOTE_DEBUG_STORAGE_KEY, '0');
+        recordBootDebugEvent('remote-debug-disabled', {});
+        return {
+          enabled: false
+        };
       },
       scan() {
         batchProcessor.schedule(document);
@@ -3155,7 +3333,15 @@
     runtimeDebug = {
       record: recordDebugEvent
     };
-    window.__gwuDebug = debugApi;
+    const pageWindow = getPageWindow();
+    if (pageWindow) {
+      pageWindow.__gwuDebug = debugApi;
+    } else {
+      window.__gwuDebug = debugApi;
+    }
+    recordBootDebugEvent('debug-installed', {
+      href: location.href
+    });
     recordDebugEvent('debug-installed', {
       readyState: document.readyState
     });
@@ -3419,12 +3605,27 @@
     return;
   }
 
-  document.addEventListener('copy', handleCopy, true);
-  installSettingsPanel();
-  installKeyboardShortcuts();
-  installCopyMarkdownButtons();
-  installCodeBlockCopyFix();
-  installAutoExpandResponses();
-  installGeminiDownloadHook();
-  installPageImageReplacement();
+  try {
+    document.addEventListener('copy', handleCopy, true);
+    installSettingsPanel();
+    installKeyboardShortcuts();
+    installCopyMarkdownButtons();
+    installCodeBlockCopyFix();
+    installAutoExpandResponses();
+    installGeminiDownloadHook();
+    installPageImageReplacement();
+    recordBootDebugEvent('install-complete', {
+      href: location.href,
+      readyState: document.readyState
+    });
+  } catch (error) {
+    recordBootDebugEvent('install-failed', {
+      href: location.href,
+      error:
+        error && typeof error.stack === 'string'
+          ? error.stack.slice(0, 600)
+          : String(error)
+    });
+    throw error;
+  }
 })();
