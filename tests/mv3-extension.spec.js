@@ -53,11 +53,20 @@ test('persists shortcut changes and reset through the GU panel', async () => {
     await expect(page.locator('#gwu-settings-panel')).toBeVisible();
     const panelStyle = await page.locator('#gwu-settings-panel').evaluate((panel) => {
       const styles = window.getComputedStyle(panel);
+      const buttonStyles = window.getComputedStyle(document.getElementById('gwu-settings-button'));
       return {
+        buttonRight: buttonStyles.right,
+        buttonBottom: buttonStyles.bottom,
+        panelRight: styles.right,
+        panelBottom: styles.bottom,
         overflowY: styles.overflowY,
         scrollbarGutter: styles.scrollbarGutter
       };
     });
+    expect(panelStyle.buttonRight).toBe('24px');
+    expect(panelStyle.buttonBottom).toBe('24px');
+    expect(panelStyle.panelRight).toBe('24px');
+    expect(panelStyle.panelBottom).toBe('76px');
     expect(panelStyle.overflowY).toBe('scroll');
     expect(panelStyle.scrollbarGutter).toContain('stable');
 

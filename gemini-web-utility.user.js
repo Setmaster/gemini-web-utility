@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.4
+ * Version: 0.9.5
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.4';
+  const SCRIPT_VERSION = '0.9.5';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -2001,8 +2001,8 @@
     style.textContent = [
       '#' + SETTINGS_BUTTON_ID + ' {',
       '  position: fixed;',
-      '  right: 1rem;',
-      '  bottom: 1rem;',
+      '  right: 1.5rem;',
+      '  bottom: 1.5rem;',
       '  z-index: 2147483646;',
       '  width: 2.75rem;',
       '  height: 2.75rem;',
@@ -2028,9 +2028,9 @@
       '}',
       '#' + SETTINGS_PANEL_ID + ' {',
       '  position: fixed;',
-      '  right: 1rem;',
-      '  bottom: 4.25rem;',
-      '  width: min(24rem, calc(100vw - 2rem));',
+      '  right: 1.5rem;',
+      '  bottom: 4.75rem;',
+      '  width: min(24rem, calc(100vw - 3rem));',
       '  max-height: min(70vh, 34rem);',
       '  overflow-x: hidden;',
       '  overflow-y: scroll;',

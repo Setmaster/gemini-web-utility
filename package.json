@@ -1,7 +1,7 @@
 {
   "name": "gemini-web-utility",
   "private": true,
-  "version": "0.9.4",
+  "version": "0.9.5",
   "description": "Manifest V3 extension utilities for the Gemini web app.",
   "scripts": {
     "test:unit": "node --test tests/core.test.js tests/metadata.test.js",
