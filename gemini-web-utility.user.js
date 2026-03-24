@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.7
+ * Version: 0.9.8
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.7';
+  const SCRIPT_VERSION = '0.9.8';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -1291,16 +1291,72 @@
     return normalizeConversationText(getNodeText(contentRoot || element));
   }
 
-  function getConversationExportTitle() {
-    if (typeof document === 'undefined') {
+  function isGenericConversationExportTitle(value) {
+    const normalized = normalizeConversationText(value).toLowerCase();
+    return (
+      !normalized ||
+      normalized === 'google gemini' ||
+      normalized === 'gemini' ||
+      normalized === 'conversation with gemini' ||
+      normalized === 'where should we start?' ||
+      normalized === 'chats' ||
+      normalized === 'new chat'
+    );
+  }
+
+  function getConversationExportTitle(docOverride) {
+    const doc = docOverride || (typeof document !== 'undefined' ? document : null);
+    if (!doc) {
       return 'Gemini Conversation';
     }
 
-    const title = String(document.title || '')
-      .replace(/\s*-\s*Gemini\s*$/i, '')
-      .trim();
+    const selectorGroups = [
+      [
+        '.conversation-title-container [data-test-id*="title"]',
+        '.conversation-title-container [data-testid*="title"]',
+        '.conversation-title-container .gds-title-m',
+        '.conversation-title-container .conversation-title-column',
+        '.conversation-title-container [class*="title"]'
+      ],
+      [
+        '[data-test-id*="title"]',
+        '[data-testid*="title"]'
+      ],
+      [
+        '[aria-current="page"] .conversation-title',
+        '[aria-current="page"] [class*="title"]'
+      ],
+      [
+        '.conversation-title'
+      ]
+    ];
 
-    return title || 'Gemini Conversation';
+    for (const selectors of selectorGroups) {
+      for (const selector of selectors) {
+        if (typeof doc.querySelectorAll !== 'function') {
+          continue;
+        }
+        const nodes = doc.querySelectorAll(selector);
+        for (const node of nodes) {
+          const text = normalizeConversationText(node && node.textContent ? node.textContent : '');
+          if (text && !isGenericConversationExportTitle(text)) {
+            return text;
+          }
+        }
+      }
+    }
+
+    const title = normalizeConversationText(
+      String(doc.title || '')
+        .replace(/\s*-\s*Gemini\s*$/i, '')
+        .trim()
+    );
+
+    if (!isGenericConversationExportTitle(title)) {
+      return title;
+    }
+
+    return 'Gemini Conversation';
   }
 
   function buildConversationMarkdown(root, options) {
@@ -1339,17 +1395,18 @@
     return sections.join('\n\n');
   }
 
-  function slugifyFilenamePart(value) {
+  function sanitizeFilenamePart(value) {
     return String(value || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80);
+      .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[. ]+$/g, '')
+      .slice(0, 120);
   }
 
   function buildConversationExportFilename(title) {
-    const slug = slugifyFilenamePart(title);
-    return (slug || 'gemini-conversation') + '.md';
+    const sanitized = sanitizeFilenamePart(title);
+    return (sanitized || 'Gemini Conversation') + '.md';
   }
 
   function downloadTextFile(filename, text, mimeType) {
@@ -4242,6 +4299,7 @@
     convertHtmlTreeToMarkdown,
     buildResponseMarkdown,
     buildConversationMarkdown,
+    getConversationExportTitle,
     buildConversationExportFilename,
     extractCodeTextFromBlock,
     classifyGeminiAssetPath,

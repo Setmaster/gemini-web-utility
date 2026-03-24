@@ -14,6 +14,7 @@ const {
   convertHtmlTreeToMarkdown,
   buildResponseMarkdown,
   buildConversationMarkdown,
+  getConversationExportTitle,
   buildConversationExportFilename,
   extractCodeTextFromBlock,
   classifyGeminiAssetPath,
@@ -558,8 +559,34 @@ test('builds conversation markdown from user and Gemini turns', () => {
 });
 
 test('builds deterministic export filenames from the conversation title', () => {
-  assert.equal(buildConversationExportFilename('Fixture Conversation'), 'fixture-conversation.md');
-  assert.equal(buildConversationExportFilename(''), 'gemini-conversation.md');
+  assert.equal(buildConversationExportFilename('Fixture Conversation'), 'Fixture Conversation.md');
+  assert.equal(buildConversationExportFilename('Prompt: "Hello" / draft'), 'Prompt Hello draft.md');
+  assert.equal(buildConversationExportFilename(''), 'Gemini Conversation.md');
+});
+
+test('prefers the active Gemini conversation title over generic document titles', () => {
+  const doc = {
+    title: 'Google Gemini',
+    querySelectorAll(selector) {
+      if (selector === '.conversation-title-container .gds-title-m') {
+        return [{ textContent: 'System Check and Offer of Help' }];
+      }
+      return [];
+    }
+  };
+
+  assert.equal(getConversationExportTitle(doc), 'System Check and Offer of Help');
+});
+
+test('falls back to a sanitized document title when no conversation title node is present', () => {
+  const doc = {
+    title: 'Fixture Conversation - Gemini',
+    querySelectorAll() {
+      return [];
+    }
+  };
+
+  assert.equal(getConversationExportTitle(doc), 'Fixture Conversation');
 });
 
 test('detects likely response expansion controls without matching unrelated actions', () => {

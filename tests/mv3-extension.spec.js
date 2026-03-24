@@ -207,7 +207,7 @@ test('auto-expands responses and exports conversations in the MV3 runtime', asyn
     const downloadPromise = exportPage.waitForEvent('download');
     await exportPage.locator('#gwu-export-conversation').click();
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toBe('fixture-conversation.md');
+    expect(download.suggestedFilename()).toBe('Fixture Conversation.md');
     const downloadPath = await download.path();
     const markdown = fs.readFileSync(downloadPath, 'utf8');
     expect(markdown).toContain('# Fixture Conversation');
