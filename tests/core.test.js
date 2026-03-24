@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   sanitizeLeadingResponseLabel,
   sanitizeSettings,
+  migrateSettings,
   parseShortcutDefinition,
   matchShortcutEvent,
   isLikelyResponseExpandControl,
@@ -243,6 +244,32 @@ test('sanitizes settings payloads against known defaults', () => {
       keyboardShortcutsEnabled: true,
       shortcutNewChat: 'Alt+N',
       shortcutStop: 'Escape'
+    }
+  );
+});
+
+test('migrates legacy new chat shortcut defaults forward', () => {
+  assert.deepEqual(
+    migrateSettings(
+      {
+        shortcutNewChat: 'Ctrl+Shift+N'
+      },
+      sanitizeSettings({
+        shortcutNewChat: 'Ctrl+Shift+N'
+      })
+    ),
+    {
+      settings: {
+        cleanCopy: true,
+        copyAsMarkdown: true,
+        codeBlockCopyFix: true,
+        watermarkRemoval: true,
+        autoExpandResponses: true,
+        keyboardShortcutsEnabled: true,
+        shortcutNewChat: 'Ctrl+Alt+N',
+        shortcutStop: 'Escape'
+      },
+      changed: true
     }
   );
 });

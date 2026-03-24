@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.7
+// @version      0.8.8
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
 // @downloadURL  http://127.0.0.1:8765/gemini-web-utility.user.js
@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.7';
+  const SCRIPT_VERSION = '0.8.8';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -94,6 +94,9 @@
     keyboardShortcutsEnabled: true,
     shortcutNewChat: 'Ctrl+Alt+N',
     shortcutStop: 'Escape'
+  });
+  const LEGACY_DEFAULT_SHORTCUTS = Object.freeze({
+    shortcutNewChat: 'Ctrl+Shift+N'
   });
   const SETTINGS_OPTIONS = [
     {
@@ -333,6 +336,26 @@
     return nextSettings;
   }
 
+  function migrateSettings(rawSettings, sanitizedSettings) {
+    const nextSettings = Object.assign({}, sanitizedSettings);
+    let changed = false;
+
+    if (
+      rawSettings &&
+      typeof rawSettings === 'object' &&
+      rawSettings.shortcutNewChat === LEGACY_DEFAULT_SHORTCUTS.shortcutNewChat &&
+      sanitizedSettings.shortcutNewChat === LEGACY_DEFAULT_SHORTCUTS.shortcutNewChat
+    ) {
+      nextSettings.shortcutNewChat = DEFAULT_SETTINGS.shortcutNewChat;
+      changed = true;
+    }
+
+    return {
+      settings: nextSettings,
+      changed
+    };
+  }
+
   function loadStoredSettings() {
     if (typeof localStorage === 'undefined') {
       return sanitizeSettings();
@@ -343,7 +366,15 @@
       if (!rawValue) {
         return sanitizeSettings();
       }
-      return sanitizeSettings(JSON.parse(rawValue));
+      const parsedSettings = JSON.parse(rawValue);
+      const sanitizedSettings = sanitizeSettings(parsedSettings);
+      const migration = migrateSettings(parsedSettings, sanitizedSettings);
+
+      if (migration.changed) {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(migration.settings));
+      }
+
+      return migration.settings;
     } catch {
       return sanitizeSettings();
     }
@@ -3602,6 +3633,7 @@
   const exported = {
     sanitizeLeadingResponseLabel,
     sanitizeSettings,
+    migrateSettings,
     parseShortcutDefinition,
     matchShortcutEvent,
     isLikelyResponseExpandControl,
