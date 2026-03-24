@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.0
+// @version      0.8.1
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -1460,7 +1460,14 @@
       '  background: rgba(255, 255, 255, 0.95);',
       '  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);',
       '  cursor: pointer;',
-      '  font-size: 1.2rem;',
+      '  display: flex;',
+      '  align-items: center;',
+      '  justify-content: center;',
+      '  font-family: "Trebuchet MS", "Segoe UI", sans-serif;',
+      '  font-size: 0.92rem;',
+      '  font-weight: 800;',
+      '  letter-spacing: -0.06em;',
+      '  color: #202124;',
       '}',
       '#' + SETTINGS_PANEL_ID + ' {',
       '  position: fixed;',
@@ -1591,7 +1598,7 @@
       button.type = 'button';
       button.title = 'Gemini Web Utility settings';
       button.setAttribute('aria-label', 'Gemini Web Utility settings');
-      button.textContent = '⚙';
+      button.textContent = 'GU';
       button.addEventListener('click', togglePanel);
 
       const panel = document.createElement('section');
@@ -3041,7 +3048,7 @@
     }
 
     const debugApi = {
-      version: '0.8.0',
+      version: '0.8.1',
       events: [],
       clear() {
         this.events.length = 0;
