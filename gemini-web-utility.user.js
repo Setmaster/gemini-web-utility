@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Gemini Web Utility
 // @namespace    https://github.com/Setmaster/gemini-web-utility
-// @version      0.8.3
+// @version      0.8.4
 // @description  Utilities for the Gemini web app.
 // @match        https://gemini.google.com/*
-// @downloadURL  https://raw.githubusercontent.com/Setmaster/gemini-web-utility/master/gemini-web-utility.user.js
-// @updateURL    https://raw.githubusercontent.com/Setmaster/gemini-web-utility/master/gemini-web-utility.user.js
+// @downloadURL  http://127.0.0.1:8765/gemini-web-utility.user.js
+// @updateURL    http://127.0.0.1:8765/gemini-web-utility.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @run-at       document-start
@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8.3';
+  const SCRIPT_VERSION = '0.8.4';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
