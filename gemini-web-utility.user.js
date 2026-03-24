@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.6
+ * Version: 0.9.7
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.6';
+  const SCRIPT_VERSION = '0.9.7';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
   const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
@@ -2050,6 +2050,7 @@
       '  scrollbar-color: rgba(221, 203, 138, 0.58) rgba(11, 14, 14, 0.28);',
       '  border-radius: inherit;',
       '  box-sizing: border-box;',
+      '  margin-right: 0.28rem;',
       '  padding: 1rem;',
       '}',
       '#' + SETTINGS_PANEL_ID + ' > .gwu-settings-panel-scroll::-webkit-scrollbar {',

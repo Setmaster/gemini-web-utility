@@ -63,6 +63,7 @@ test('persists shortcut changes and reset through the GU panel', async () => {
         panelBottom: styles.bottom,
         panelOverflow: styles.overflow,
         panelRadius: styles.borderRadius,
+        scrollMarginRight: scrollStyles.marginRight,
         scrollOverflowY: scrollStyles.overflowY,
         scrollGutter: scrollStyles.scrollbarGutter,
         scrollRadius: scrollStyles.borderRadius
@@ -74,6 +75,7 @@ test('persists shortcut changes and reset through the GU panel', async () => {
     expect(panelStyle.panelBottom).toBe('76px');
     expect(panelStyle.panelOverflow).toBe('hidden');
     expect(panelStyle.panelRadius).toBe('16px');
+    expect(panelStyle.scrollMarginRight).toBe('4.48px');
     expect(panelStyle.scrollOverflowY).toBe('scroll');
     expect(panelStyle.scrollGutter).toContain('stable');
     expect(panelStyle.scrollRadius).toBe('16px');
