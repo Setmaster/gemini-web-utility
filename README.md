@@ -150,7 +150,7 @@ The repo includes three test layers:
 
 ## Status
 
-- Current public pre-`1.0` line: `0.9.10`
+- Current public pre-`1.0` line: `0.9.11`
 - `1.0.0` is intentionally reserved for the final release line after public-launch validation.
 
 ## License

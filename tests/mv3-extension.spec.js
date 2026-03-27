@@ -220,3 +220,33 @@ test('auto-expands responses and exports conversations in the MV3 runtime', asyn
     await closeExtensionContext(context, userDataDir, extensionPath);
   }
 });
+
+test('retries processing for delayed Gemini lightbox images in the MV3 runtime', async () => {
+  const { context, userDataDir, extensionPath } = await launchExtensionContext();
+  try {
+    const page = await context.newPage();
+    await page.goto('http://127.0.0.1:8765/tests/pages/lightbox-watermark.html');
+
+    await page.locator('.image-button').click();
+    await expect
+      .poll(() => page.evaluate(() => window.getLightboxState()), { timeout: 8000 })
+      .toMatchObject({
+        width: 589
+      });
+
+    await expect
+      .poll(
+        () => page.evaluate(() => {
+          const state = window.getLightboxState();
+          return state ? { state: state.state, reason: state.reason, src: state.src } : null;
+        }),
+        { timeout: 8000 }
+      )
+      .toMatchObject({
+        state: 'skipped',
+        reason: 'no-watermark-detected'
+      });
+  } finally {
+    await closeExtensionContext(context, userDataDir, extensionPath);
+  }
+});

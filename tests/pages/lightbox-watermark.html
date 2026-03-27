@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>GWU Lightbox Watermark Fixture</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        display: grid;
+        place-items: center;
+      }
+
+      generated-image,
+      single-image {
+        display: block;
+      }
+
+      .attachment-container {
+        padding: 24px;
+        border-radius: 24px;
+        background: rgba(15, 23, 42, 0.92);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.45);
+      }
+
+      .image-container {
+        position: relative;
+      }
+
+      .overlay-container,
+      .dialog-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+
+      .image-button {
+        padding: 0;
+        background: transparent;
+      }
+
+      .image {
+        width: 320px;
+        height: auto;
+        border-radius: 18px;
+        display: block;
+      }
+
+      .cdk-overlay-container {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: rgba(2, 6, 23, 0.82);
+      }
+
+      .mat-mdc-dialog-container {
+        max-width: 92vw;
+        max-height: 92vh;
+      }
+
+      .mat-mdc-dialog-surface {
+        background: #020617;
+        border-radius: 24px;
+        padding: 20px;
+      }
+
+      .image-viewport {
+        min-width: 320px;
+        min-height: 320px;
+      }
+
+      .image-viewport img {
+        display: block;
+        max-width: 72vw;
+        max-height: 72vh;
+        border-radius: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="attachment-container generated-images">
+      <response-element>
+        <generated-image>
+          <single-image class="generated-image large image-expansion-dialog-trigger-fade">
+            <div class="image-container replace-fife-images-at-export">
+              <div class="overlay-container">
+                <button class="image-button" type="button" aria-label="Open generated image">
+                  <img class="image animate loaded" alt=", AI generated">
+                </button>
+              </div>
+              <div class="overlay-container">
+                <button type="button">Share</button>
+                <button type="button">Download</button>
+                <button type="button">More</button>
+              </div>
+            </div>
+          </single-image>
+        </generated-image>
+      </response-element>
+    </div>
+
+    <script>
+      function buildFixtureImageUrl() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 589;
+        canvas.height = 1024;
+        const context = canvas.getContext('2d');
+        const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+        gradient.addColorStop(0, '#0ea5e9');
+        gradient.addColorStop(0.5, '#1d4ed8');
+        gradient.addColorStop(1, '#172554');
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        context.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        for (let index = 0; index < 8; index += 1) {
+          context.fillRect(48 + (index * 52), 72 + (index * 66), 120, 24);
+        }
+
+        context.fillStyle = '#f8fafc';
+        context.font = '700 56px sans-serif';
+        context.fillText('Fixture', 54, 180);
+        context.font = '500 34px sans-serif';
+        context.fillText('Dialog image retry', 54, 232);
+        context.fillText('should not stay untouched', 54, 278);
+        return canvas.toDataURL('image/png');
+      }
+
+      const fixtureImageUrl = buildFixtureImageUrl();
+      const inlineImage = document.querySelector('generated-image img');
+      inlineImage.src = fixtureImageUrl;
+
+      function buildDialog() {
+        const overlay = document.createElement('div');
+        overlay.className = 'cdk-overlay-container';
+        overlay.innerHTML = `
+          <div class="cdk-overlay-pane">
+            <mat-dialog-container class="mat-mdc-dialog-container mdc-dialog cdk-dialog-container">
+              <div class="mat-mdc-dialog-inner-container mdc-dialog__container">
+                <div class="mat-mdc-dialog-surface mdc-dialog__surface">
+                  <expansion-dialog class="mat-mdc-dialog-component-host">
+                    <mat-dialog-content class="mat-mdc-dialog-content mdc-dialog__content dialog-container">
+                      <div class="generated-image-container">
+                        <div data-test-id="image-viewport" class="image-viewport">
+                          <img data-test-id="trusted-image" class="image-container generated-image" alt="" src="">
+                          <canvas data-test-id="mask-canvas" class="mask-canvas" width="589" height="1024"></canvas>
+                          <div class="dialog-actions">
+                            <button type="button">Share</button>
+                            <button type="button">Download</button>
+                            <button type="button">Edit</button>
+                            <button type="button">Variant</button>
+                            <button type="button">Save</button>
+                            <button type="button">Menu</button>
+                            <button type="button">Close</button>
+                          </div>
+                        </div>
+                      </div>
+                    </mat-dialog-content>
+                  </expansion-dialog>
+                </div>
+              </div>
+            </mat-dialog-container>
+          </div>
+        `;
+
+        const dialogImage = overlay.querySelector('[data-test-id="trusted-image"]');
+        dialogImage.style.width = '0px';
+        dialogImage.style.height = '0px';
+        dialogImage.style.opacity = '0';
+
+        setTimeout(() => {
+          dialogImage.src = fixtureImageUrl;
+        }, 50);
+
+        setTimeout(() => {
+          dialogImage.style.width = '589px';
+          dialogImage.style.height = '1024px';
+          dialogImage.style.opacity = '1';
+        }, 450);
+
+        document.body.appendChild(overlay);
+      }
+
+      document.querySelector('.image-button').addEventListener('click', () => {
+        if (!document.querySelector('mat-dialog-container')) {
+          buildDialog();
+        }
+      });
+
+      window.getLightboxState = function getLightboxState() {
+        const dialogImage = document.querySelector('mat-dialog-container [data-test-id="trusted-image"]');
+        if (!dialogImage) {
+          return null;
+        }
+
+        return {
+          src: dialogImage.currentSrc || dialogImage.src || '',
+          state: dialogImage.dataset.gwuImageState || '',
+          reason: dialogImage.dataset.gwuDebugReason || '',
+          width: dialogImage.clientWidth,
+          height: dialogImage.clientHeight
+        };
+      };
+    </script>
+  </body>
+</html>

@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.10
+ * Version: 0.9.11
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.10';
+  const SCRIPT_VERSION = '0.9.11';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const MAX_BOOT_DEBUG_EVENTS = 80;
 
@@ -53,6 +53,13 @@
   ].join(', ');
 
   const GEMINI_IMAGE_CONTAINER_SELECTOR = 'generated-image, .generated-image-container';
+  const GEMINI_IMAGE_DIALOG_SELECTOR = 'expansion-dialog, mat-dialog-container, [role="dialog"], .cdk-overlay-pane, .cdk-overlay-container';
+  const GEMINI_IMAGE_ACTIVATION_SELECTOR = [
+    'generated-image button.image-button',
+    '.generated-image-container button.image-button',
+    'generated-image img',
+    '.generated-image-container img'
+  ].join(', ');
   const GEMINI_IMAGE_QUERY_SELECTOR = GEMINI_IMAGE_CONTAINER_SELECTOR
     .split(',')
     .map((selector) => selector.trim() + ' img')
@@ -66,6 +73,8 @@
   const MIN_GEMINI_IMAGE_EDGE = 128;
   const MAX_CONTAINER_SEARCH_DEPTH = 4;
   const MIN_ACTION_BUTTONS = 2;
+  const LIGHTBOX_RESCAN_DELAYS_MS = [80, 260, 800, 1600];
+  const ACTIVATED_IMAGE_CONTEXT_TTL_MS = 10000;
   const DEBUG_EVENT_LIMIT = 300;
   const DEBUG_IMAGE_ID_KEY = 'gwuDebugId';
   const DEBUG_REASON_KEY = 'gwuDebugReason';
@@ -3159,6 +3168,27 @@
     return hasMeaningfulGeminiImageSize(image) && hasNearbyActionCluster(image);
   }
 
+  function isGeminiDialogImageElement(image) {
+    return Boolean(
+      image &&
+      typeof image.closest === 'function' &&
+      image.closest(GEMINI_IMAGE_DIALOG_SELECTOR)
+    );
+  }
+
+  function isLikelyDeferredGeminiImage(image) {
+    if (!(image instanceof HTMLImageElement)) {
+      return false;
+    }
+
+    if (!image.closest(GEMINI_IMAGE_CONTAINER_SELECTOR) && !isGeminiDialogImageElement(image)) {
+      return false;
+    }
+
+    const size = getMediaEdgeSize(image);
+    return size.width < MIN_GEMINI_IMAGE_EDGE && size.height < MIN_GEMINI_IMAGE_EDGE;
+  }
+
   function resolveProcessingSourceKey(image) {
     const sourceUrl = resolveCandidateImageUrl(image);
     if (sourceUrl) {
@@ -3227,6 +3257,7 @@
     const sourceUrl = resolveCandidateImageUrl(image);
     const sourceKey = resolveProcessingSourceKey(image);
     const inGeminiContainer = Boolean(image && typeof image.closest === 'function' && image.closest(GEMINI_IMAGE_CONTAINER_SELECTOR));
+    const inGeminiDialog = isGeminiDialogImageElement(image);
     const meaningfulSize = hasMeaningfulGeminiImageSize(image);
     const hasActionCluster = hasNearbyActionCluster(image);
     const usesRenderedFallback = meaningfulSize && hasActionCluster;
@@ -3235,6 +3266,8 @@
     let reason = 'not-processable';
     if (isGeminiAsset && inGeminiContainer) {
       reason = 'gemini-asset-container';
+    } else if (isGeminiAsset && inGeminiDialog) {
+      reason = 'gemini-asset-dialog';
     } else if (isGeminiAsset && meaningfulSize) {
       reason = 'gemini-asset-size';
     } else if (isGeminiAsset) {
@@ -3248,7 +3281,7 @@
     }
 
     return {
-      processable: isGeminiAsset ? (inGeminiContainer || meaningfulSize) : usesRenderedFallback,
+      processable: isGeminiAsset ? (inGeminiContainer || inGeminiDialog || meaningfulSize) : usesRenderedFallback,
       reason,
       size,
       sourceUrl,
@@ -3259,6 +3292,7 @@
       stableSource,
       isGeminiAsset,
       inGeminiContainer,
+      inGeminiDialog,
       meaningfulSize,
       hasActionCluster,
       usesRenderedFallback,
@@ -3299,18 +3333,34 @@
     return Array.from(images);
   }
 
-  function addCandidateImage(candidates, image) {
-    if (isProcessableGeminiImageElement(image)) {
-      candidates.add(image);
-    }
-  }
-
-  function collectCandidateImages(root) {
+  function collectCandidateImages(root, options) {
     const candidates = new Set();
-    collectImagesInTree(root).forEach((image) => addCandidateImage(candidates, image));
+    const onDeferredImage = options && typeof options.onDeferredImage === 'function'
+      ? options.onDeferredImage
+      : null;
+
+    collectImagesInTree(root).forEach((image) => {
+      if (isProcessableGeminiImageElement(image)) {
+        candidates.add(image);
+        return;
+      }
+
+      if (onDeferredImage && isLikelyDeferredGeminiImage(image)) {
+        onDeferredImage(image);
+      }
+    });
 
     if (root && typeof root.querySelectorAll === 'function') {
-      root.querySelectorAll(GEMINI_IMAGE_QUERY_SELECTOR).forEach((image) => addCandidateImage(candidates, image));
+      root.querySelectorAll(GEMINI_IMAGE_QUERY_SELECTOR).forEach((image) => {
+        if (isProcessableGeminiImageElement(image)) {
+          candidates.add(image);
+          return;
+        }
+
+        if (onDeferredImage && isLikelyDeferredGeminiImage(image)) {
+          onDeferredImage(image);
+        }
+      });
     }
 
     return Array.from(candidates);
@@ -3732,10 +3782,12 @@
 
   function installPageImageReplacement() {
     const processing = new WeakSet();
+    const retryScheduled = new WeakSet();
     const observedRoots = new WeakSet();
     const activeObservers = [];
     const imageIds = new WeakMap();
     let nextImageId = 1;
+    let lastActivatedGeminiImageContext = null;
 
     function truncateDebugValue(value, maxLength) {
       const text = String(value || '');
@@ -3834,6 +3886,7 @@
         processable: candidate.processable,
         isGeminiAsset: candidate.isGeminiAsset,
         inGeminiContainer: candidate.inGeminiContainer,
+        inGeminiDialog: candidate.inGeminiDialog,
         meaningfulSize: candidate.meaningfulSize,
         hasActionCluster: candidate.hasActionCluster,
         usesRenderedFallback: candidate.usesRenderedFallback,
@@ -3875,9 +3928,138 @@
       readyState: document.readyState
     });
 
+    function scheduleImageRetryOnLoad(imageElement, reason) {
+      if (!(imageElement instanceof HTMLImageElement)) {
+        return;
+      }
+
+      if (retryScheduled.has(imageElement)) {
+        return;
+      }
+
+      const size = getMediaEdgeSize(imageElement);
+      if (size.width >= MIN_GEMINI_IMAGE_EDGE || size.height >= MIN_GEMINI_IMAGE_EDGE) {
+        return;
+      }
+
+      retryScheduled.add(imageElement);
+      const imageId = getDebugImageId(imageElement);
+
+      function flushRetry(trigger) {
+        if (!retryScheduled.has(imageElement)) {
+          return;
+        }
+        retryScheduled.delete(imageElement);
+        recordDebugEvent('image-retry-scheduled', {
+          imageId,
+          trigger,
+          reason: reason || ''
+        });
+        batchProcessor.schedule(imageElement);
+      }
+
+      function clearRetry() {
+        retryScheduled.delete(imageElement);
+      }
+
+      imageElement.addEventListener('load', () => flushRetry('load'), { once: true });
+      imageElement.addEventListener('error', clearRetry, { once: true });
+
+      if (typeof imageElement.decode === 'function') {
+        imageElement.decode().then(
+          () => flushRetry('decode'),
+          () => clearRetry()
+        );
+      }
+
+      setTimeout(() => flushRetry('timeout'), 1800);
+    }
+
+    function captureGeminiImageContext(imageElement) {
+      if (!(imageElement instanceof HTMLImageElement)) {
+        return null;
+      }
+
+      const sourceUrl = resolveCandidateImageUrl(imageElement);
+      const stableSource = imageElement.dataset && typeof imageElement.dataset[STABLE_SOURCE_KEY] === 'string'
+        ? imageElement.dataset[STABLE_SOURCE_KEY].trim()
+        : '';
+
+      return {
+        sourceUrl,
+        stableSource: stableSource || (isGeminiGeneratedAssetUrl(sourceUrl) ? sourceUrl : ''),
+        activatedAt: Date.now()
+      };
+    }
+
+    function findActivatedGeminiImage(target) {
+      if (!(target instanceof Element)) {
+        return null;
+      }
+
+      const directImage = target.closest('img');
+      if (directImage instanceof HTMLImageElement && directImage.closest(GEMINI_IMAGE_CONTAINER_SELECTOR)) {
+        return directImage;
+      }
+
+      const activator = target.closest(GEMINI_IMAGE_ACTIVATION_SELECTOR);
+      if (!activator) {
+        return null;
+      }
+
+      const image = activator instanceof HTMLImageElement
+        ? activator
+        : activator.querySelector('img');
+
+      if (!(image instanceof HTMLImageElement)) {
+        return null;
+      }
+
+      return image.closest(GEMINI_IMAGE_CONTAINER_SELECTOR) ? image : null;
+    }
+
+    function scheduleLightboxRescan() {
+      LIGHTBOX_RESCAN_DELAYS_MS.forEach((delayMs) => {
+        setTimeout(() => {
+          batchProcessor.schedule(document);
+        }, delayMs);
+      });
+    }
+
+    function maybePrimeDialogImageFromContext(imageElement) {
+      if (!(imageElement instanceof HTMLImageElement)) {
+        return;
+      }
+
+      if (!isGeminiDialogImageElement(imageElement) || !imageElement.dataset || !lastActivatedGeminiImageContext) {
+        return;
+      }
+
+      if ((Date.now() - lastActivatedGeminiImageContext.activatedAt) > ACTIVATED_IMAGE_CONTEXT_TTL_MS) {
+        return;
+      }
+
+      const resolvedSource = lastActivatedGeminiImageContext.stableSource || lastActivatedGeminiImageContext.sourceUrl;
+      if (!resolvedSource || !isGeminiGeneratedAssetUrl(resolvedSource)) {
+        return;
+      }
+
+      if (!imageElement.dataset[STABLE_SOURCE_KEY]) {
+        imageElement.dataset[STABLE_SOURCE_KEY] = resolvedSource;
+      }
+      if (!imageElement.dataset[EXPLICIT_SOURCE_KEY]) {
+        imageElement.dataset[EXPLICIT_SOURCE_KEY] = resolvedSource;
+      }
+    }
+
     function processRoot(root) {
       // Swap matching Gemini images in-place once the processed blob is ready.
-      const candidates = collectCandidateImages(root || document);
+      const candidates = collectCandidateImages(root || document, {
+        onDeferredImage(imageElement) {
+          maybePrimeDialogImageFromContext(imageElement);
+          scheduleImageRetryOnLoad(imageElement, 'deferred-image');
+        }
+      });
       recordDebugEvent('root-scan', {
         root: getRootKind(root || document),
         candidateCount: candidates.length
@@ -3894,6 +4076,7 @@
         return;
       }
 
+      maybePrimeDialogImageFromContext(imageElement);
       const candidate = describeGeminiImageCandidate(imageElement);
       const imageId = getDebugImageId(imageElement);
       setImageDebugMetadata(imageElement, {
@@ -3901,6 +4084,9 @@
       });
 
       if (!candidate.processable) {
+        if (isLikelyDeferredGeminiImage(imageElement)) {
+          scheduleImageRetryOnLoad(imageElement, candidate.reason);
+        }
         recordDebugEvent('image-skip-unprocessable', {
           imageId,
           reason: candidate.reason
@@ -3911,6 +4097,9 @@
       const sourceKey = candidate.sourceKey;
       const sourceUrl = candidate.sourceUrl;
       if (!sourceKey || processing.has(imageElement)) {
+        if (!sourceKey && isLikelyDeferredGeminiImage(imageElement)) {
+          scheduleImageRetryOnLoad(imageElement, 'missing-source-key');
+        }
         recordDebugEvent('image-skip-processing-lock', {
           imageId,
           reason: !sourceKey ? 'missing-source-key' : 'already-processing'
@@ -4086,6 +4275,26 @@
 
       batchProcessor.schedule(root);
     }
+
+    document.addEventListener(
+      'click',
+      (event) => {
+        const sourceImage = findActivatedGeminiImage(event.target);
+        if (!sourceImage) {
+          return;
+        }
+
+        lastActivatedGeminiImageContext = captureGeminiImageContext(sourceImage);
+        recordDebugEvent('image-activation', {
+          imageId: getDebugImageId(sourceImage),
+          sourceUrl: lastActivatedGeminiImageContext && lastActivatedGeminiImageContext.sourceUrl
+            ? lastActivatedGeminiImageContext.sourceUrl
+            : ''
+        });
+        scheduleLightboxRescan();
+      },
+      true
+    );
 
     if (document.readyState === 'loading') {
       document.addEventListener(
