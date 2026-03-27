@@ -1,9 +1,10 @@
 {
   "name": "gemini-web-utility",
   "private": true,
-  "version": "0.9.8",
+  "version": "0.9.9",
   "description": "Manifest V3 extension utilities for the Gemini web app.",
   "scripts": {
+    "build:zip": "bash scripts/build-webstore-zip.sh",
     "test:unit": "node --test tests/core.test.js tests/metadata.test.js",
     "test:mv3": "playwright test tests/mv3-extension.spec.js --config=tests/playwright.mv3.config.js",
     "test:live": "playwright test tests/live-gemini.spec.js --config=tests/playwright.live.config.js",

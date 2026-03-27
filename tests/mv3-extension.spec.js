@@ -2,9 +2,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium, test, expect } = require('@playwright/test');
+const { buildTestExtension } = require('./build-test-extension.js');
 
 async function launchExtensionContext() {
-  const extensionPath = path.resolve(__dirname, '..');
+  const extensionPath = buildTestExtension();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gwu-mv3-'));
   const context = await chromium.launchPersistentContext(userDataDir, {
     channel: 'chromium',
@@ -24,12 +25,13 @@ async function launchExtensionContext() {
     origin: 'http://127.0.0.1:8765'
   });
 
-  return { context, serviceWorker, userDataDir };
+  return { context, serviceWorker, userDataDir, extensionPath };
 }
 
-async function closeExtensionContext(context, userDataDir) {
+async function closeExtensionContext(context, userDataDir, extensionPath) {
   await context.close();
   fs.rmSync(userDataDir, { recursive: true, force: true });
+  fs.rmSync(extensionPath, { recursive: true, force: true });
 }
 
 async function readStoredSettings(serviceWorker) {
@@ -41,7 +43,7 @@ async function readStoredSettings(serviceWorker) {
 }
 
 test('persists shortcut changes and reset through the GU panel', async () => {
-  const { context, serviceWorker, userDataDir } = await launchExtensionContext();
+  const { context, serviceWorker, userDataDir, extensionPath } = await launchExtensionContext();
   try {
     expect(serviceWorker.url()).toContain('chrome-extension://');
 
@@ -94,12 +96,12 @@ test('persists shortcut changes and reset through the GU panel', async () => {
     const storedAfterReset = await readStoredSettings(serviceWorker);
     expect(storedAfterReset.gwuSettings.shortcutNewChat).toBe('Ctrl+Alt+N');
   } finally {
-    await closeExtensionContext(context, userDataDir);
+    await closeExtensionContext(context, userDataDir, extensionPath);
   }
 });
 
 test('handles clean copy selection and copy markdown in the MV3 runtime', async () => {
-  const { context, userDataDir } = await launchExtensionContext();
+  const { context, userDataDir, extensionPath } = await launchExtensionContext();
   try {
     const page = await context.newPage();
     await page.goto('http://127.0.0.1:8765/tests/pages/copy-markdown.html');
@@ -135,12 +137,12 @@ test('handles clean copy selection and copy markdown in the MV3 runtime', async 
     expect(copiedButtonPayload['text/markdown']).toContain('### Weekly Plan');
     expect(copiedButtonPayload['text/plain']).toContain("```js\nconsole.log('fixture');\n```");
   } finally {
-    await closeExtensionContext(context, userDataDir);
+    await closeExtensionContext(context, userDataDir, extensionPath);
   }
 });
 
 test('intercepts code-block copy in the MV3 runtime', async () => {
-  const { context, userDataDir } = await launchExtensionContext();
+  const { context, userDataDir, extensionPath } = await launchExtensionContext();
   try {
     const page = await context.newPage();
     await page.goto('http://127.0.0.1:8765/tests/pages/code-copy.html');
@@ -150,12 +152,12 @@ test('intercepts code-block copy in the MV3 runtime', async () => {
     const state = await page.evaluate(() => window.getCodeCopyState());
     expect(state.nativeClicked).toBe(false);
   } finally {
-    await closeExtensionContext(context, userDataDir);
+    await closeExtensionContext(context, userDataDir, extensionPath);
   }
 });
 
 test('triggers shipped keyboard shortcuts in the MV3 runtime', async () => {
-  const { context, userDataDir } = await launchExtensionContext();
+  const { context, userDataDir, extensionPath } = await launchExtensionContext();
   try {
     const page = await context.newPage();
     await page.goto('http://127.0.0.1:8765/tests/pages/keyboard-shortcuts.html');
@@ -182,12 +184,12 @@ test('triggers shipped keyboard shortcuts in the MV3 runtime', async () => {
     });
     await expect(page.locator('#status')).toHaveText('stop');
   } finally {
-    await closeExtensionContext(context, userDataDir);
+    await closeExtensionContext(context, userDataDir, extensionPath);
   }
 });
 
 test('auto-expands responses and exports conversations in the MV3 runtime', async () => {
-  const { context, userDataDir } = await launchExtensionContext();
+  const { context, userDataDir, extensionPath } = await launchExtensionContext();
   try {
     const expandPage = await context.newPage();
     await expandPage.goto('http://127.0.0.1:8765/tests/pages/auto-expand.html');
@@ -215,6 +217,6 @@ test('auto-expands responses and exports conversations in the MV3 runtime', asyn
     expect(markdown).toContain('## Gemini');
     expect(markdown).toContain('Boil water.');
   } finally {
-    await closeExtensionContext(context, userDataDir);
+    await closeExtensionContext(context, userDataDir, extensionPath);
   }
 });

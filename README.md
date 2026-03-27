@@ -23,6 +23,7 @@ Manifest V3 Chrome/Chromium extension for the Gemini web app.
 
 - Install deps: `npm install`
 - Unit + MV3 fixture suite: `npm test`
+- Build a Chrome Web Store zip: `npm run build:zip`
 - Live authenticated Gemini validation:
   - `GWU_RUN_LIVE=1 npm run test:live`
   - optional overrides:
