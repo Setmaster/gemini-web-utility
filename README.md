@@ -1,8 +1,16 @@
+![Gemini Web Utility banner](docs/readme-banner-v2.png)
+
 # Gemini Web Utility
 
 Gemini Web Utility is a Manifest V3 Chrome extension that adds focused quality-of-life improvements to the Gemini web app.
 
 It stays inside Gemini's existing interface instead of replacing it with a separate dashboard or popup-driven workflow. The goal is simple: make Gemini feel cleaner, faster, and less frustrating for people who use it heavily.
+
+## At a Glance
+
+- fixes real Gemini paper cuts instead of layering on a separate workflow
+- keeps everything in-page, including settings, export, and copy improvements
+- ships as a modern Manifest V3 extension for current Chrome
 
 ## Why It Exists
 
