@@ -13,7 +13,7 @@ function buildTestExtension() {
   const sourceRoot = path.resolve(__dirname, '..');
   const extensionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gwu-ext-'));
   const filesToCopy = [
-    'gemini-web-utility.user.js',
+    'content_script.js',
     'manifest.json',
     'service_worker.js'
   ];

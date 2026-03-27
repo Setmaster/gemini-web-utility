@@ -18,7 +18,7 @@ function readScriptVersion(filePath) {
 test('keeps package, manifest, and content script versions aligned', () => {
   const packageJson = readJson(path.join(repoRoot, 'package.json'));
   const manifestJson = readJson(path.join(repoRoot, 'manifest.json'));
-  const scriptVersion = readScriptVersion(path.join(repoRoot, 'gemini-web-utility.user.js'));
+  const scriptVersion = readScriptVersion(path.join(repoRoot, 'content_script.js'));
 
   assert.equal(packageJson.version, manifestJson.version);
   assert.equal(packageJson.version, scriptVersion);

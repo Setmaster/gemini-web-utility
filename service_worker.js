@@ -12,12 +12,6 @@ function isAllowedFetchUrl(url) {
       return true;
     }
 
-    if (
-      parsedUrl.protocol === 'http:' &&
-      (hostname === '127.0.0.1' || hostname === 'localhost')
-    ) {
-      return true;
-    }
   } catch {
     return false;
   }
@@ -61,25 +55,6 @@ async function fetchBlobPayload(url) {
   };
 }
 
-async function postDebugPayload(endpoint, payload) {
-  if (!isAllowedFetchUrl(endpoint)) {
-    throw new Error('Blocked debug endpoint');
-  }
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload),
-    keepalive: true
-  });
-
-  return {
-    ok: response.ok
-  };
-}
-
 if (typeof chrome !== 'undefined' && chrome && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || typeof message !== 'object') {
@@ -88,18 +63,6 @@ if (typeof chrome !== 'undefined' && chrome && chrome.runtime && chrome.runtime.
 
     if (message.type === 'gwu-fetch-blob') {
       fetchBlobPayload(message.url)
-        .then(sendResponse)
-        .catch((error) => {
-          sendResponse({
-            ok: false,
-            error: error && error.message ? error.message : String(error)
-          });
-        });
-      return true;
-    }
-
-    if (message.type === 'gwu-post-debug') {
-      postDebugPayload(message.endpoint, message.payload)
         .then(sendResponse)
         .catch((error) => {
           sendResponse({

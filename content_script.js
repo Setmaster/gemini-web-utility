@@ -1,17 +1,14 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.9
+ * Version: 0.9.10
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.9';
+  const SCRIPT_VERSION = '0.9.10';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
-  const REMOTE_DEBUG_STORAGE_KEY = 'gwuRemoteDebugEnabled';
-  const REMOTE_DEBUG_ENDPOINT_STORAGE_KEY = 'gwuRemoteDebugEndpoint';
-  const DEFAULT_REMOTE_DEBUG_ENDPOINT = 'http://127.0.0.1:8766/gwu-debug';
   const MAX_BOOT_DEBUG_EVENTS = 80;
 
   const RESPONSE_CONTAINER_SELECTOR = '.response-container';
@@ -159,18 +156,6 @@
     events: []
   };
 
-  function getUserscriptWindow() {
-    if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
-      return unsafeWindow;
-    }
-
-    if (typeof window !== 'undefined') {
-      return window;
-    }
-
-    return null;
-  }
-
   function getExtensionApi() {
     if (typeof chrome !== 'undefined' && chrome && chrome.runtime && chrome.runtime.id) {
       return chrome;
@@ -286,99 +271,6 @@
     }
   }
 
-  function getRemoteDebugEndpoint() {
-    const configuredEndpoint = readStorageValue(REMOTE_DEBUG_ENDPOINT_STORAGE_KEY).trim();
-    return configuredEndpoint || DEFAULT_REMOTE_DEBUG_ENDPOINT;
-  }
-
-  function isRemoteDebugEnabled() {
-    return readStorageValue(REMOTE_DEBUG_STORAGE_KEY) === '1';
-  }
-
-  function pushRemoteDebugEvent(entry) {
-    if (!isRemoteDebugEnabled()) {
-      return;
-    }
-
-    if (canUseExtensionMessaging()) {
-      extensionSendMessage({
-        type: 'gwu-post-debug',
-        endpoint: getRemoteDebugEndpoint(),
-        payload: entry
-      }).catch(() => {
-        // Ignore extension transport failures and continue with local fallback paths.
-      });
-      return;
-    }
-
-    const requestApi =
-      typeof GM_xmlhttpRequest === 'function'
-        ? GM_xmlhttpRequest
-        : typeof GM !== 'undefined' && GM && typeof GM.xmlHttpRequest === 'function'
-          ? GM.xmlHttpRequest.bind(GM)
-          : null;
-
-    if (requestApi) {
-      try {
-        requestApi({
-          method: 'POST',
-          url: getRemoteDebugEndpoint(),
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          data: JSON.stringify(entry),
-          timeout: 2500
-        });
-        return;
-      } catch {
-        // Fall through to fetch when the userscript transport fails synchronously.
-      }
-    }
-
-    if (typeof fetch !== 'function') {
-      return;
-    }
-
-    try {
-      fetch(getRemoteDebugEndpoint(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(entry),
-        mode: 'cors',
-        keepalive: true
-      });
-    } catch {
-      // Ignore remote debug transport failures.
-    }
-  }
-
-  function exposeBootDebug() {
-    const pageWindow = getUserscriptWindow();
-    if (!pageWindow) {
-      return;
-    }
-
-    pageWindow.__gwuVersion = SCRIPT_VERSION;
-    pageWindow.__gwuBootDebug = {
-      version: SCRIPT_VERSION,
-      get events() {
-        return bootDebugState.events.slice();
-      },
-      dump() {
-        return JSON.stringify(
-          {
-            version: SCRIPT_VERSION,
-            events: bootDebugState.events.slice()
-          },
-          null,
-          2
-        );
-      }
-    };
-  }
-
   function recordBootDebugEvent(type, details) {
     const entry = Object.assign(
       {
@@ -401,11 +293,8 @@
         events: bootDebugState.events
       })
     );
-    exposeBootDebug();
-    pushRemoteDebugEvent(entry);
   }
 
-  exposeBootDebug();
   recordBootDebugEvent('boot', {
     href: typeof location !== 'undefined' ? location.href : '',
     readyState: typeof document !== 'undefined' ? document.readyState : 'no-document'
@@ -2742,7 +2631,7 @@
   }
 
   function getPageWindow() {
-    return getUserscriptWindow();
+    return typeof window !== 'undefined' ? window : null;
   }
 
   function getUserscriptRequestApi() {
@@ -3962,9 +3851,9 @@
         },
         details || {}
       );
-      debugApi.events.push(entry);
-      if (debugApi.events.length > DEBUG_EVENT_LIMIT) {
-        debugApi.events.splice(0, debugApi.events.length - DEBUG_EVENT_LIMIT);
+      debugState.events.push(entry);
+      if (debugState.events.length > DEBUG_EVENT_LIMIT) {
+        debugState.events.splice(0, debugState.events.length - DEBUG_EVENT_LIMIT);
       }
     }
 
@@ -3972,86 +3861,13 @@
       return collectImagesInTree(root || document).map((image) => inspectImage(image));
     }
 
-    const debugApi = {
-      version: SCRIPT_VERSION,
-      events: [],
-      clear() {
-        this.events.length = 0;
-      },
-      getEvents() {
-        return this.events.slice();
-      },
-      inspectImages(root) {
-        return inspectImages(root);
-      },
-      summary() {
-        const images = inspectImages(document);
-        const counts = {
-          totalImages: images.length,
-          processableImages: images.filter((image) => image.processable).length,
-          readyImages: images.filter((image) => image.state === 'ready').length,
-          failedImages: images.filter((image) => image.state === 'failed').length,
-          skippedImages: images.filter((image) => image.state === 'skipped').length,
-          processingImages: images.filter((image) => image.state === 'processing').length,
-          shadowImages: images.filter((image) => image.inShadowRoot).length
-        };
-
-        return {
-          version: this.version,
-          observers: activeObservers.length,
-          counts,
-          images,
-          recentEvents: this.events.slice(-25)
-        };
-      },
-      dump() {
-        return JSON.stringify(this.summary(), null, 2);
-      },
-      bootDump() {
-        return readStorageValue(BOOT_DEBUG_STORAGE_KEY) || '';
-      },
-      copy() {
-        const dump = this.dump();
-        if (typeof window.copy === 'function') {
-          window.copy(dump);
-        }
-        return dump;
-      },
-      enableRemoteLogging(endpoint) {
-        writeStorageValue(REMOTE_DEBUG_STORAGE_KEY, '1');
-        if (typeof endpoint === 'string' && endpoint.trim()) {
-          writeStorageValue(REMOTE_DEBUG_ENDPOINT_STORAGE_KEY, endpoint.trim());
-        }
-        recordBootDebugEvent('remote-debug-enabled', {
-          endpoint: getRemoteDebugEndpoint()
-        });
-        return {
-          enabled: true,
-          endpoint: getRemoteDebugEndpoint()
-        };
-      },
-      disableRemoteLogging() {
-        writeStorageValue(REMOTE_DEBUG_STORAGE_KEY, '0');
-        recordBootDebugEvent('remote-debug-disabled', {});
-        return {
-          enabled: false
-        };
-      },
-      scan() {
-        batchProcessor.schedule(document);
-        return this.summary();
-      }
+    const debugState = {
+      events: []
     };
 
     runtimeDebug = {
       record: recordDebugEvent
     };
-    const pageWindow = getPageWindow();
-    if (pageWindow) {
-      pageWindow.__gwuDebug = debugApi;
-    } else {
-      window.__gwuDebug = debugApi;
-    }
     recordBootDebugEvent('debug-installed', {
       href: location.href
     });

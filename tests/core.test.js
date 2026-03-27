@@ -26,7 +26,7 @@ const {
   getEmbeddedAlphaMap,
   processWatermarkImageData,
   hasProcessedImageApplied
-} = require('../gemini-web-utility.user.js');
+} = require('../content_script.js');
 
 function textNode(text) {
   return {
@@ -289,6 +289,10 @@ test('allows redirected Gemini image hosts in the MV3 fetch bridge', () => {
   );
   assert.equal(
     isAllowedFetchUrl('https://example.com/image.png'),
+    false
+  );
+  assert.equal(
+    isAllowedFetchUrl('http://127.0.0.1:8766/gwu-debug'),
     false
   );
 });

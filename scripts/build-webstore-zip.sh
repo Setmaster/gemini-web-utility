@@ -12,7 +12,7 @@ rm -rf "${stage_dir}" "${zip_path}"
 mkdir -p "${stage_dir}/icons"
 
 cp "${repo_root}/manifest.json" "${stage_dir}/manifest.json"
-cp "${repo_root}/gemini-web-utility.user.js" "${stage_dir}/gemini-web-utility.user.js"
+cp "${repo_root}/content_script.js" "${stage_dir}/content_script.js"
 cp "${repo_root}/service_worker.js" "${stage_dir}/service_worker.js"
 cp "${repo_root}"/icons/* "${stage_dir}/icons/"
 
