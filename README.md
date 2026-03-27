@@ -144,3 +144,7 @@ The repo includes three test layers:
 
 - Current public pre-`1.0` line: `0.9.10`
 - `1.0.0` is intentionally reserved for the final release line after public-launch validation.
+
+## License
+
+MIT
