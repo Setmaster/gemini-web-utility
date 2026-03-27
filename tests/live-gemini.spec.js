@@ -1,17 +1,22 @@
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { chromium, test, expect } = require('@playwright/test');
 
 const LIVE_ENABLED = process.env.GWU_RUN_LIVE === '1';
-const LIVE_PROFILE_DIR = process.env.GWU_LIVE_PROFILE_DIR || '/tmp/gwu-mv3-headed-profile';
-const LIVE_CHAT_URL =
-  process.env.GWU_LIVE_CHAT_URL || 'https://gemini.google.com/app/067f52754e845ec4';
+const LIVE_PROFILE_DIR =
+  process.env.GWU_LIVE_PROFILE_DIR || path.join(os.tmpdir(), 'gwu-mv3-live-profile');
+const LIVE_CHAT_URL = process.env.GWU_LIVE_CHAT_URL || '';
 
 test.skip(!LIVE_ENABLED, 'Set GWU_RUN_LIVE=1 to run authenticated Gemini validation.');
 
 test('validates the extension against a live Gemini chat', async () => {
   if (!fs.existsSync(LIVE_PROFILE_DIR)) {
     throw new Error('Live Gemini profile not found at ' + LIVE_PROFILE_DIR);
+  }
+
+  if (!LIVE_CHAT_URL) {
+    throw new Error('Set GWU_LIVE_CHAT_URL to a real Gemini chat URL before running the live test.');
   }
 
   const extensionPath = path.resolve(__dirname, '..');
