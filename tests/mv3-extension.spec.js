@@ -168,14 +168,16 @@ test('intercepts copy image and writes the displayed image blob in the MV3 runti
 
     await page.getByRole('button', { name: 'Copy image' }).click();
     await expect
-      .poll(() => page.locator('#copy-image').textContent(), { timeout: 5000 })
-      .toBe('Image Copied');
+      .poll(() => page.locator('#gwu-toast').textContent(), { timeout: 5000 })
+      .toBe('Image copied');
 
     const copyState = await page.evaluate(() => ({
-      nativeCalls: window.__nativeCopyImageCalls
+      nativeCalls: window.__nativeCopyImageCalls,
+      buttonText: document.getElementById('copy-image')?.textContent || ''
     }));
 
     expect(copyState.nativeCalls).toBe(0);
+    expect(copyState.buttonText).toBe('Copy image');
   } finally {
     await closeExtensionContext(context, userDataDir, extensionPath);
   }

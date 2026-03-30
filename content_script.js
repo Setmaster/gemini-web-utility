@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.12
+ * Version: 0.9.13
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.12';
+  const SCRIPT_VERSION = '0.9.13';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const MAX_BOOT_DEBUG_EVENTS = 80;
 
@@ -37,7 +37,8 @@
   const COPY_MARKDOWN_BUTTON_CLASS = 'gwu-copy-markdown-button';
   const COPY_MARKDOWN_BUTTON_ATTRIBUTE = 'data-gwu-copy-markdown';
   const COPY_MARKDOWN_STYLE_ID = 'gwu-copy-markdown-style';
-  const IMAGE_COPY_ACTION_FEEDBACK_ATTRIBUTE = 'data-gwu-copy-image-feedback';
+  const TOAST_STYLE_ID = 'gwu-toast-style';
+  const TOAST_ELEMENT_ID = 'gwu-toast';
   const AUTO_EXPAND_CONTROL_ATTRIBUTE = 'data-gwu-auto-expand-processed';
   const EXPORT_CONVERSATION_BUTTON_ID = 'gwu-export-conversation';
   const MAX_CODE_COPY_SCOPE_DEPTH = 5;
@@ -160,6 +161,7 @@
   let runtimeDebug = null;
   let runtimeSettings = null;
   let extensionSettingsHydrationStarted = false;
+  let toastHideTimeoutId = 0;
   const settingsListeners = new Set();
   const bootDebugState = {
     version: SCRIPT_VERSION,
@@ -1493,24 +1495,99 @@
     return true;
   }
 
-  function updateImageCopyControlFeedback(control, nextText) {
-    if (!(control instanceof HTMLElement)) {
+  function ensureToastStyles() {
+    if (typeof document === 'undefined' || document.getElementById(TOAST_STYLE_ID)) {
       return;
     }
 
-    if (!control.hasAttribute(IMAGE_COPY_ACTION_FEEDBACK_ATTRIBUTE)) {
-      control.setAttribute(IMAGE_COPY_ACTION_FEEDBACK_ATTRIBUTE, control.textContent || '');
+    const styleHost = document.head || document.documentElement;
+    if (!styleHost) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', ensureToastStyles, { once: true });
+      }
+      return;
     }
 
-    const originalText = control.getAttribute(IMAGE_COPY_ACTION_FEEDBACK_ATTRIBUTE) || '';
-    if (nextText) {
-      control.textContent = nextText;
-      window.setTimeout(() => {
-        if (control.isConnected) {
-          control.textContent = originalText;
-        }
-      }, 1400);
+    const style = document.createElement('style');
+    style.id = TOAST_STYLE_ID;
+    style.textContent = [
+      '#' + TOAST_ELEMENT_ID + ' {',
+      '  position: fixed;',
+      '  left: 50%;',
+      '  bottom: 28px;',
+      '  transform: translate(-50%, 16px);',
+      '  padding: 10px 14px;',
+      '  border-radius: 999px;',
+      '  background: rgba(15, 23, 42, 0.94);',
+      '  border: 1px solid rgba(148, 163, 184, 0.24);',
+      '  color: #f8fafc;',
+      '  font: 500 13px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
+      '  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.35);',
+      '  opacity: 0;',
+      '  pointer-events: none;',
+      '  z-index: 2147483647;',
+      '  transition: opacity 120ms ease, transform 120ms ease;',
+      '}',
+      '#' + TOAST_ELEMENT_ID + '[data-visible="true"] {',
+      '  opacity: 1;',
+      '  transform: translate(-50%, 0);',
+      '}'
+    ].join('\n');
+    styleHost.appendChild(style);
+  }
+
+  function getOrCreateToastElement() {
+    if (typeof document === 'undefined') {
+      return null;
     }
+
+    let toast = document.getElementById(TOAST_ELEMENT_ID);
+    if (toast) {
+      return toast;
+    }
+
+    const host = document.body || document.documentElement;
+    if (!host) {
+      return null;
+    }
+
+    toast = document.createElement('div');
+    toast.id = TOAST_ELEMENT_ID;
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    toast.setAttribute('aria-atomic', 'true');
+    toast.hidden = true;
+    host.appendChild(toast);
+    return toast;
+  }
+
+  function showToast(message) {
+    if (!message) {
+      return;
+    }
+
+    ensureToastStyles();
+    const toast = getOrCreateToastElement();
+    if (!toast) {
+      return;
+    }
+
+    if (toastHideTimeoutId) {
+      window.clearTimeout(toastHideTimeoutId);
+    }
+
+    toast.hidden = false;
+    toast.textContent = message;
+    toast.setAttribute('data-visible', 'true');
+
+    toastHideTimeoutId = window.setTimeout(() => {
+      toast.setAttribute('data-visible', 'false');
+      window.setTimeout(() => {
+        if (toast.getAttribute('data-visible') === 'false') {
+          toast.hidden = true;
+        }
+      }, 140);
+    }, 1400);
   }
 
   function installImageCopyOverride() {
@@ -1542,9 +1619,9 @@
               throw new Error('Clipboard image API unavailable');
             }
 
-            updateImageCopyControlFeedback(control, 'Image Copied');
+            showToast('Image copied');
           } catch {
-            updateImageCopyControlFeedback(control, 'Copy Failed');
+            showToast('Copy failed');
           }
         })();
       },
