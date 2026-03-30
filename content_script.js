@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.14
+ * Version: 0.9.15
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.14';
+  const SCRIPT_VERSION = '0.9.15';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const MAX_BOOT_DEBUG_EVENTS = 80;
 
@@ -40,6 +40,7 @@
   const TOAST_STYLE_ID = 'gwu-toast-style';
   const TOAST_ELEMENT_ID = 'gwu-toast';
   const EXPANDED_IMAGE_EDITOR_STYLE_ID = 'gwu-expanded-image-editor-style';
+  const UPSELL_BUTTON_STYLE_ID = 'gwu-upsell-button-style';
   const AUTO_EXPAND_CONTROL_ATTRIBUTE = 'data-gwu-auto-expand-processed';
   const EXPORT_CONVERSATION_BUTTON_ID = 'gwu-export-conversation';
   const MAX_CODE_COPY_SCOPE_DEPTH = 5;
@@ -98,6 +99,7 @@
     codeBlockCopyFix: true,
     watermarkRemoval: true,
     expandedImageEditor: true,
+    hideUpgradeButton: true,
     autoExpandResponses: true,
     keyboardShortcutsEnabled: true,
     shortcutNewChat: 'Ctrl+Alt+N',
@@ -131,6 +133,11 @@
       key: 'expandedImageEditor',
       label: 'Expanded Image Editor',
       description: 'Keep Gemini\'s draw-over-image editor visible in the enlarged image dialog.'
+    },
+    {
+      key: 'hideUpgradeButton',
+      label: 'Hide Upgrade Button',
+      description: 'Hide Gemini\'s Upgrade button in the sidebar and menu surfaces.'
     },
     {
       key: 'autoExpandResponses',
@@ -1644,6 +1651,50 @@
     applyExpandedImageEditorSetting(getSettings());
     subscribeToSettings((settings) => {
       applyExpandedImageEditorSetting(settings);
+    });
+  }
+
+  function ensureUpsellButtonStyles() {
+    if (typeof document === 'undefined' || document.getElementById(UPSELL_BUTTON_STYLE_ID)) {
+      return;
+    }
+
+    const styleHost = document.head || document.documentElement;
+    if (!styleHost) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', ensureUpsellButtonStyles, { once: true });
+      }
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = UPSELL_BUTTON_STYLE_ID;
+    style.textContent = [
+      'html[data-gwu-hide-upgrade-button="true"] bard-upsell-menu-button,',
+      'html[data-gwu-hide-upgrade-button="true"] [data-test-id="bard-upsell-menu-button"],',
+      'html[data-gwu-hide-upgrade-button="true"] .bard-upsell-menu-button {',
+      '  display: none !important;',
+      '}'
+    ].join('\n');
+    styleHost.appendChild(style);
+  }
+
+  function applyUpgradeButtonSetting(settings) {
+    if (typeof document === 'undefined' || !document.documentElement) {
+      return;
+    }
+
+    ensureUpsellButtonStyles();
+    document.documentElement.setAttribute(
+      'data-gwu-hide-upgrade-button',
+      settings && settings.hideUpgradeButton !== false ? 'true' : 'false'
+    );
+  }
+
+  function installUpgradeButtonToggle() {
+    applyUpgradeButtonSetting(getSettings());
+    subscribeToSettings((settings) => {
+      applyUpgradeButtonSetting(settings);
     });
   }
 
@@ -4702,6 +4753,7 @@
     installKeyboardShortcuts();
     installCopyMarkdownButtons();
     installExpandedImageEditorToggle();
+    installUpgradeButtonToggle();
     installImageCopyOverride();
     installCodeBlockCopyFix();
     installAutoExpandResponses();

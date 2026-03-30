@@ -50,6 +50,8 @@ test('persists shortcut changes and reset through the GU panel', async () => {
     const page = await context.newPage();
     await page.goto('http://127.0.0.1:8765/tests/pages/settings-panel.html');
 
+    await expect(page.locator('bard-upsell-menu-button')).toBeHidden();
+
     await expect(page.locator('#gwu-settings-button')).toHaveText('GU');
     await page.locator('#gwu-settings-button').click();
     await expect(page.locator('#gwu-settings-panel')).toBeVisible();
@@ -90,11 +92,20 @@ test('persists shortcut changes and reset through the GU panel', async () => {
     const storedAfterCapture = await readStoredSettings(serviceWorker);
     expect(storedAfterCapture.gwuSettings.shortcutNewChat).toBe('Ctrl+Alt+Space');
 
+    const upgradeToggle = page
+      .locator('.gwu-settings-option')
+      .filter({ hasText: 'Hide Upgrade Button' })
+      .locator('input[type="checkbox"]');
+    await upgradeToggle.uncheck();
+    await expect(page.locator('bard-upsell-menu-button')).toBeVisible();
+
     await page.locator('#gwu-reset-settings').click();
     await expect(page.locator('[data-gwu-shortcut-key="shortcutNewChat"]')).toHaveText('Ctrl+Alt+N');
+    await expect(page.locator('bard-upsell-menu-button')).toBeHidden();
 
     const storedAfterReset = await readStoredSettings(serviceWorker);
     expect(storedAfterReset.gwuSettings.shortcutNewChat).toBe('Ctrl+Alt+N');
+    expect(storedAfterReset.gwuSettings.hideUpgradeButton).toBe(true);
   } finally {
     await closeExtensionContext(context, userDataDir, extensionPath);
   }
