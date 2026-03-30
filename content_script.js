@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.13
+ * Version: 0.9.14
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.13';
+  const SCRIPT_VERSION = '0.9.14';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const MAX_BOOT_DEBUG_EVENTS = 80;
 
@@ -39,6 +39,7 @@
   const COPY_MARKDOWN_STYLE_ID = 'gwu-copy-markdown-style';
   const TOAST_STYLE_ID = 'gwu-toast-style';
   const TOAST_ELEMENT_ID = 'gwu-toast';
+  const EXPANDED_IMAGE_EDITOR_STYLE_ID = 'gwu-expanded-image-editor-style';
   const AUTO_EXPAND_CONTROL_ATTRIBUTE = 'data-gwu-auto-expand-processed';
   const EXPORT_CONVERSATION_BUTTON_ID = 'gwu-export-conversation';
   const MAX_CODE_COPY_SCOPE_DEPTH = 5;
@@ -96,6 +97,7 @@
     copyAsMarkdown: true,
     codeBlockCopyFix: true,
     watermarkRemoval: true,
+    expandedImageEditor: true,
     autoExpandResponses: true,
     keyboardShortcutsEnabled: true,
     shortcutNewChat: 'Ctrl+Alt+N',
@@ -124,6 +126,11 @@
       key: 'watermarkRemoval',
       label: 'Watermark Removal',
       description: 'Keep NanoBanana image watermark removal active.'
+    },
+    {
+      key: 'expandedImageEditor',
+      label: 'Expanded Image Editor',
+      description: 'Keep Gemini\'s draw-over-image editor visible in the enlarged image dialog.'
     },
     {
       key: 'autoExpandResponses',
@@ -1588,6 +1595,56 @@
         }
       }, 140);
     }, 1400);
+  }
+
+  function ensureExpandedImageEditorStyles() {
+    if (typeof document === 'undefined' || document.getElementById(EXPANDED_IMAGE_EDITOR_STYLE_ID)) {
+      return;
+    }
+
+    const styleHost = document.head || document.documentElement;
+    if (!styleHost) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', ensureExpandedImageEditorStyles, { once: true });
+      }
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = EXPANDED_IMAGE_EDITOR_STYLE_ID;
+    style.textContent = [
+      'html[data-gwu-expanded-image-editor="disabled"] mat-dialog-container[aria-label*="Lightbox"] edit-toolbar,',
+      'html[data-gwu-expanded-image-editor="disabled"] mat-dialog-container[aria-label*="Lightbox"] .mask-canvas,',
+      'html[data-gwu-expanded-image-editor="disabled"] mat-dialog-container[aria-label*="Lightbox"] .loading-overlay-canvas,',
+      'html[data-gwu-expanded-image-editor="disabled"] mat-dialog-container[aria-label*="Lightbox"] [data-test-id="edit-done-button"],',
+      'html[data-gwu-expanded-image-editor="disabled"] mat-dialog-container[aria-label*="Lightbox"] [data-test-id="undo-button"],',
+      'html[data-gwu-expanded-image-editor="disabled"] mat-dialog-container[aria-label*="Lightbox"] [data-test-id="redo-button"] {',
+      '  display: none !important;',
+      '}',
+      'html[data-gwu-expanded-image-editor="disabled"] mat-dialog-container[aria-label*="Lightbox"] [data-test-id="image-viewport"] {',
+      '  cursor: default !important;',
+      '}'
+    ].join('\n');
+    styleHost.appendChild(style);
+  }
+
+  function applyExpandedImageEditorSetting(settings) {
+    if (typeof document === 'undefined' || !document.documentElement) {
+      return;
+    }
+
+    ensureExpandedImageEditorStyles();
+    document.documentElement.setAttribute(
+      'data-gwu-expanded-image-editor',
+      settings && settings.expandedImageEditor === false ? 'disabled' : 'enabled'
+    );
+  }
+
+  function installExpandedImageEditorToggle() {
+    applyExpandedImageEditorSetting(getSettings());
+    subscribeToSettings((settings) => {
+      applyExpandedImageEditorSetting(settings);
+    });
   }
 
   function installImageCopyOverride() {
@@ -4644,6 +4701,7 @@
     installSettingsPanel();
     installKeyboardShortcuts();
     installCopyMarkdownButtons();
+    installExpandedImageEditorToggle();
     installImageCopyOverride();
     installCodeBlockCopyFix();
     installAutoExpandResponses();

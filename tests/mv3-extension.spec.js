@@ -100,6 +100,55 @@ test('persists shortcut changes and reset through the GU panel', async () => {
   }
 });
 
+test('can disable the expanded image editor overlay in the MV3 runtime', async () => {
+  const { context, serviceWorker, userDataDir, extensionPath } = await launchExtensionContext();
+  try {
+    const settingsPage = await context.newPage();
+    await settingsPage.goto('http://127.0.0.1:8765/tests/pages/settings-panel.html');
+    await settingsPage.locator('#gwu-settings-button').click();
+
+    const editorToggle = settingsPage
+      .locator('.gwu-settings-option')
+      .filter({ hasText: 'Expanded Image Editor' })
+      .locator('input[type="checkbox"]');
+    await editorToggle.uncheck();
+
+    const storedSettings = await readStoredSettings(serviceWorker);
+    expect(storedSettings.gwuSettings.expandedImageEditor).toBe(false);
+
+    const page = await context.newPage();
+    await page.goto('http://127.0.0.1:8765/tests/pages/lightbox-watermark.html');
+    await page.locator('.image-button').click();
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const maskCanvas = document.querySelector('mat-dialog-container .mask-canvas');
+            const editToolbar = document.querySelector('mat-dialog-container edit-toolbar');
+            const doneButton = document.querySelector('mat-dialog-container [data-test-id="edit-done-button"]');
+            if (!maskCanvas || !editToolbar || !doneButton) {
+              return null;
+            }
+
+            return {
+              maskCanvas: getComputedStyle(maskCanvas).display,
+              editToolbar: getComputedStyle(editToolbar).display,
+              doneButton: getComputedStyle(doneButton).display
+            };
+          }),
+        { timeout: 8000 }
+      )
+      .toMatchObject({
+        maskCanvas: 'none',
+        editToolbar: 'none',
+        doneButton: 'none'
+      });
+  } finally {
+    await closeExtensionContext(context, userDataDir, extensionPath);
+  }
+});
+
 test('handles clean copy selection and copy markdown in the MV3 runtime', async () => {
   const { context, userDataDir, extensionPath } = await launchExtensionContext();
   try {

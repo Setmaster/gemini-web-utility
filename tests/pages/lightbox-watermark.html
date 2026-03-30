@@ -86,6 +86,18 @@
         max-height: 72vh;
         border-radius: 20px;
       }
+
+      .editor-controls {
+        display: flex;
+        gap: 8px;
+        margin: 12px 0;
+      }
+
+      edit-toolbar {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
     </style>
   </head>
   <body>
@@ -146,7 +158,7 @@
         overlay.className = 'cdk-overlay-container';
         overlay.innerHTML = `
           <div class="cdk-overlay-pane">
-            <mat-dialog-container class="mat-mdc-dialog-container mdc-dialog cdk-dialog-container">
+            <mat-dialog-container class="mat-mdc-dialog-container mdc-dialog cdk-dialog-container" aria-label="Lightbox showing the image in a larger version">
               <div class="mat-mdc-dialog-inner-container mdc-dialog__container">
                 <div class="mat-mdc-dialog-surface mdc-dialog__surface">
                   <expansion-dialog class="mat-mdc-dialog-component-host">
@@ -155,6 +167,17 @@
                         <div data-test-id="image-viewport" class="image-viewport">
                           <img data-test-id="trusted-image" class="image-container generated-image" alt="" src="">
                           <canvas data-test-id="mask-canvas" class="mask-canvas" width="589" height="1024"></canvas>
+                          <canvas class="loading-overlay-canvas" width="589" height="1024"></canvas>
+                          <div class="editor-controls">
+                            <button type="button" data-test-id="undo-button">Undo</button>
+                            <button type="button" data-test-id="redo-button">Redo</button>
+                            <button type="button" data-test-id="edit-done-button">Done</button>
+                          </div>
+                          <edit-toolbar data-test-id="edit-toolbar">
+                            <button type="button" data-test-id="doodle-mask-tool-button">Draw</button>
+                            <button type="button" data-test-id="color-button-#FE5252">Red</button>
+                            <button type="button" data-test-id="color-button-#00B0FF">Blue</button>
+                          </edit-toolbar>
                           <div class="dialog-actions">
                             <button type="button">Share</button>
                             <button type="button">Download</button>
