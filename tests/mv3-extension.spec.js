@@ -156,6 +156,31 @@ test('intercepts code-block copy in the MV3 runtime', async () => {
   }
 });
 
+test('intercepts copy image and writes the displayed image blob in the MV3 runtime', async () => {
+  const { context, userDataDir, extensionPath } = await launchExtensionContext();
+  try {
+    const page = await context.newPage();
+    await page.goto('http://127.0.0.1:8765/tests/pages/copy-image.html');
+
+    await expect
+      .poll(() => page.locator('.image').evaluate((img) => img.dataset.gwuImageState || ''))
+      .toBe('skipped');
+
+    await page.getByRole('button', { name: 'Copy image' }).click();
+    await expect
+      .poll(() => page.locator('#copy-image').textContent(), { timeout: 5000 })
+      .toBe('Image Copied');
+
+    const copyState = await page.evaluate(() => ({
+      nativeCalls: window.__nativeCopyImageCalls
+    }));
+
+    expect(copyState.nativeCalls).toBe(0);
+  } finally {
+    await closeExtensionContext(context, userDataDir, extensionPath);
+  }
+});
+
 test('triggers shipped keyboard shortcuts in the MV3 runtime', async () => {
   const { context, userDataDir, extensionPath } = await launchExtensionContext();
   try {

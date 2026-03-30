@@ -1,6 +1,6 @@
 {
   "name": "gemini-web-utility",
-  "version": "0.9.11",
+  "version": "0.9.12",
   "description": "Quality-of-life utilities for the Gemini web app as a Manifest V3 extension.",
   "license": "MIT",
   "keywords": [

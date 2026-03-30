@@ -1,13 +1,13 @@
 /*
  * Gemini Web Utility
- * Version: 0.9.11
+ * Version: 0.9.12
  * Primary runtime: Manifest V3 Chrome extension content script
  */
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9.11';
+  const SCRIPT_VERSION = '0.9.12';
   const BOOT_DEBUG_STORAGE_KEY = 'gwuBootDebug';
   const MAX_BOOT_DEBUG_EVENTS = 80;
 
@@ -37,6 +37,7 @@
   const COPY_MARKDOWN_BUTTON_CLASS = 'gwu-copy-markdown-button';
   const COPY_MARKDOWN_BUTTON_ATTRIBUTE = 'data-gwu-copy-markdown';
   const COPY_MARKDOWN_STYLE_ID = 'gwu-copy-markdown-style';
+  const IMAGE_COPY_ACTION_FEEDBACK_ATTRIBUTE = 'data-gwu-copy-image-feedback';
   const AUTO_EXPAND_CONTROL_ATTRIBUTE = 'data-gwu-auto-expand-processed';
   const EXPORT_CONVERSATION_BUTTON_ID = 'gwu-export-conversation';
   const MAX_CODE_COPY_SCOPE_DEPTH = 5;
@@ -1335,6 +1336,220 @@
     }
 
     return downloadTextFile(buildConversationExportFilename(title), markdown, 'text/markdown;charset=utf-8');
+  }
+
+  function getControlAccessibleText(element) {
+    if (!(element instanceof Element)) {
+      return '';
+    }
+
+    const parts = [
+      element.getAttribute('aria-label') || '',
+      element.getAttribute('title') || '',
+      element.getAttribute('data-test-id') || '',
+      element.textContent || ''
+    ];
+
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function isLikelyImageCopyControl(control) {
+    if (!(control instanceof Element)) {
+      return false;
+    }
+
+    return /copy image/i.test(getControlAccessibleText(control));
+  }
+
+  function getImageCopyControlFromEvent(event) {
+    if (!event || !event.target || !(event.target instanceof Element)) {
+      return null;
+    }
+
+    const control = event.target.closest('button, [role="button"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]');
+    if (!control || !isLikelyImageCopyControl(control)) {
+      return null;
+    }
+
+    return control;
+  }
+
+  function pickBestGeneratedImage(images) {
+    if (!Array.isArray(images) || images.length === 0) {
+      return null;
+    }
+
+    let bestImage = null;
+    let bestScore = -1;
+
+    images.forEach((imageElement) => {
+      if (!(imageElement instanceof HTMLImageElement)) {
+        return;
+      }
+
+      const candidate = describeGeminiImageCandidate(imageElement);
+      if (!(candidate.inGeminiContainer || candidate.inGeminiDialog || candidate.meaningfulSize)) {
+        return;
+      }
+
+      const area = candidate.size.width * candidate.size.height;
+      const score = area + (candidate.inGeminiDialog ? 1e9 : 0) + (candidate.isGeminiAsset ? 5e8 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        bestImage = imageElement;
+      }
+    });
+
+    return bestImage;
+  }
+
+  function findGeneratedImageForCopyControl(control) {
+    if (!(control instanceof Element)) {
+      return null;
+    }
+
+    const dialogRoot = control.closest(GEMINI_IMAGE_DIALOG_SELECTOR);
+    if (dialogRoot && typeof dialogRoot.querySelectorAll === 'function') {
+      const dialogImage = pickBestGeneratedImage(Array.from(dialogRoot.querySelectorAll('img')));
+      if (dialogImage) {
+        return dialogImage;
+      }
+    }
+
+    const containerRoot = control.closest(GEMINI_IMAGE_CONTAINER_SELECTOR);
+    if (containerRoot && typeof containerRoot.querySelectorAll === 'function') {
+      const containerImage = pickBestGeneratedImage(Array.from(containerRoot.querySelectorAll('img')));
+      if (containerImage) {
+        return containerImage;
+      }
+    }
+
+    let current = control.parentElement;
+    let depth = 0;
+    while (current && depth < MAX_CONTAINER_SEARCH_DEPTH + 2) {
+      const scopeImages = typeof current.querySelectorAll === 'function'
+        ? Array.from(current.querySelectorAll('img'))
+        : [];
+      const scopedImage = pickBestGeneratedImage(scopeImages);
+      if (scopedImage) {
+        return scopedImage;
+      }
+      current = current.parentElement;
+      depth += 1;
+    }
+
+    return null;
+  }
+
+  async function resolveClipboardImageBlob(imageElement) {
+    if (!(imageElement instanceof HTMLImageElement)) {
+      return null;
+    }
+
+    const currentSrc = typeof imageElement.currentSrc === 'string' ? imageElement.currentSrc.trim() : '';
+    const src = typeof imageElement.src === 'string' ? imageElement.src.trim() : '';
+    const activeUrl = currentSrc || src;
+
+    if (activeUrl && (activeUrl.startsWith('blob:') || activeUrl.startsWith('data:'))) {
+      const response = await fetch(activeUrl);
+      if (!response.ok) {
+        throw new Error('Failed to fetch displayed image: ' + response.status);
+      }
+      return response.blob();
+    }
+
+    const sourceUrl = resolveCandidateImageUrl(imageElement) || activeUrl;
+    if (!sourceUrl) {
+      return null;
+    }
+
+    const sourceResult = await fetchSourceBlobForImage(imageElement, sourceUrl);
+    if (!isFeatureEnabled('watermarkRemoval')) {
+      return sourceResult.blob;
+    }
+
+    const processed = await processWatermarkBlob(sourceResult.blob);
+    return processed && processed.processedBlob ? processed.processedBlob : sourceResult.blob;
+  }
+
+  async function writeClipboardImageBlob(blob) {
+    if (!(blob instanceof Blob) || blob.size === 0) {
+      return false;
+    }
+
+    if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem === 'undefined') {
+      return false;
+    }
+
+    const mimeType = blob.type && blob.type.startsWith('image/')
+      ? blob.type
+      : 'image/png';
+    const clipboardBlob = blob.type === mimeType ? blob : blob.slice(0, blob.size, mimeType);
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        [mimeType]: clipboardBlob
+      })
+    ]);
+    return true;
+  }
+
+  function updateImageCopyControlFeedback(control, nextText) {
+    if (!(control instanceof HTMLElement)) {
+      return;
+    }
+
+    if (!control.hasAttribute(IMAGE_COPY_ACTION_FEEDBACK_ATTRIBUTE)) {
+      control.setAttribute(IMAGE_COPY_ACTION_FEEDBACK_ATTRIBUTE, control.textContent || '');
+    }
+
+    const originalText = control.getAttribute(IMAGE_COPY_ACTION_FEEDBACK_ATTRIBUTE) || '';
+    if (nextText) {
+      control.textContent = nextText;
+      window.setTimeout(() => {
+        if (control.isConnected) {
+          control.textContent = originalText;
+        }
+      }, 1400);
+    }
+  }
+
+  function installImageCopyOverride() {
+    document.addEventListener(
+      'click',
+      (event) => {
+        const control = getImageCopyControlFromEvent(event);
+        if (!control) {
+          return;
+        }
+
+        const imageElement = findGeneratedImageForCopyControl(control);
+        if (!imageElement) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        void (async () => {
+          try {
+            const blob = await resolveClipboardImageBlob(imageElement);
+            if (!blob) {
+              throw new Error('No image blob available');
+            }
+
+            const copied = await writeClipboardImageBlob(blob);
+            if (!copied) {
+              throw new Error('Clipboard image API unavailable');
+            }
+
+            updateImageCopyControlFeedback(control, 'Image Copied');
+          } catch {
+            updateImageCopyControlFeedback(control, 'Copy Failed');
+          }
+        })();
+      },
+      true
+    );
   }
 
   async function writeClipboardPayload(payload) {
@@ -4352,6 +4567,7 @@
     installSettingsPanel();
     installKeyboardShortcuts();
     installCopyMarkdownButtons();
+    installImageCopyOverride();
     installCodeBlockCopyFix();
     installAutoExpandResponses();
     installGeminiDownloadHook();
